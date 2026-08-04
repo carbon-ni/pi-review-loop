@@ -215,6 +215,14 @@ button { color: inherit; }
 .monaco-editor .margin-view-overlays .line-numbers { cursor: pointer; }
 .monaco-editor .review-comment-line { background: rgba(122, 162, 247, .08); }
 .monaco-editor .review-comment-glyph { background: var(--accent); border-radius: 50%; width: 7px !important; height: 7px !important; margin: 6px 0 0 5px; }
+.monaco-editor .review-cursor-line { background: rgba(122, 162, 247, .16); box-shadow: inset 2px 0 0 var(--accent-strong); }
+.monaco-editor .review-cursor-glyph { background: var(--accent-strong); width: 3px !important; margin-left: 3px; }
+
+/* Vim window focus indicators */
+.sidebar, #editor, .feedback-panel { transition: box-shadow .1s ease; }
+.sidebar.focused { box-shadow: inset 2px 0 0 var(--accent); }
+#editor.focused { box-shadow: inset 0 2px 0 var(--accent); }
+.feedback-panel.focused { box-shadow: inset 0 2px 0 var(--accent); }
 .monaco-editor .review-glyph-plus {
   width: 16px !important;
   height: 16px !important;

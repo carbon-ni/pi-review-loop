@@ -93,6 +93,44 @@ Review Loop does not parse or attribute pi tool calls. Any on-disk change—whet
 
 Inline comments remain attached to the recorded pane and line number. If that file changes again before the review is submitted, verify that the comment still refers to the intended code.
 
+## Keyboard navigation
+
+The review window follows a vim **window + buffer** model. Press `?` in the window to show the keymap at any time.
+
+The UI is four windows: the sidebar, the two diff panes (original / modified), and the feedback panel. You switch focus between windows, then move a cursor *inside* the focused window.
+
+### Switch windows
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+w` `h`/`j`/`k`/`l` | focus the window left/down/up/right |
+| `Ctrl+w` `w` / `W` | cycle to next / previous window |
+| `Ctrl+h`/`j`/`k`/`l` | same, single-keystroke (reliable fallback) |
+
+> Note: some webviews intercept `Ctrl+W` as "close window" before the page sees it. If `Ctrl+W` closes your review window, use `Ctrl+h/j/k/l` instead — they always work.
+
+### Move inside the focused window (buffer)
+
+| Key | Sidebar (file list) | Diff pane |
+| --- | --- | --- |
+| `j` / `k` | next / previous file | cursor line down / up |
+| `g` / `G` | first / last file | cursor to first / last line |
+| `Ctrl+d` / `Ctrl+u` | — | half-page down / up |
+| `c` | — | comment the line under the cursor |
+| `Enter` / `o` | open file | — |
+| `/` | focus file filter | find text in this pane |
+
+### Anywhere
+
+| Key | Action |
+| --- | --- |
+| `f` | add a file note |
+| `s` | submit the review |
+| `m` | toggle Since review ↔ vs HEAD |
+| `?` | show this keymap |
+
+Keys are inert while typing in a text field (file note, draft, Monaco's find box). Clicking a pane also moves focus there. Because the diff is read-only, the line cursor is for navigation and commenting only.
+
 ## Session persistence
 
 Each submitted review appends a `review-loop/checkpoint` custom entry to the active pi session. The checkpoint stores:
