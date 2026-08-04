@@ -106,6 +106,7 @@ test("resolveBufferAction: global keys work from any window", () => {
     assert.equal(resolveBufferAction(window, ctx("s")), "submit", `s in ${window}`);
     assert.equal(resolveBufferAction(window, ctx("m")), "toggle-mode", `m in ${window}`);
     assert.equal(resolveBufferAction(window, ctx("f")), "file-note", `f in ${window}`);
+    assert.equal(resolveBufferAction(window, ctx("v")), "engage-files", `v in ${window}`);
   }
 });
 
@@ -125,6 +126,12 @@ test("resolveBufferAction: Ctrl+d/Ctrl+u half-page the diff cursor", () => {
 test("resolveBufferAction: other modifier combos are inert (window nav owns them)", () => {
   assert.equal(resolveBufferAction("modified", ctx("h", { hasModifier: true })), "none");
   assert.equal(resolveBufferAction("sidebar", ctx("l", { hasModifier: true })), "none");
+});
+
+test("resolveBufferAction: v revives file nav but stays inert while typing", () => {
+  assert.equal(resolveBufferAction("modified", ctx("v")), "engage-files");
+  assert.equal(resolveBufferAction("sidebar", ctx("v")), "engage-files");
+  assert.equal(resolveBufferAction("sidebar", ctx("v", { isTyping: true })), "none", "lets you type the letter v");
 });
 
 test("resolveBufferAction: unmapped keys are none", () => {

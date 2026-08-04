@@ -127,9 +127,10 @@ The UI is four windows: the sidebar, the two diff panes (original / modified), a
 | `f` | add a file note |
 | `s` | submit the review |
 | `m` | toggle Since review ↔ vs HEAD |
+| `v` | revive file-list navigation (snap focus back to the sidebar) |
 | `?` | show this keymap |
 
-Keys are inert while typing in a text field (file note, draft, Monaco's find box). Clicking a pane also moves focus there. Because the diff is read-only, the line cursor is for navigation and commenting only.
+Keys are inert while typing in a text field (file note, draft, Monaco's find box), so `v` types normally inside them. Clicking a pane also moves focus there. Because the diff is read-only, the line cursor is for navigation and commenting only.
 
 ## Session persistence
 

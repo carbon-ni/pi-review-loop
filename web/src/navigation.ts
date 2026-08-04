@@ -38,7 +38,8 @@ export type BufferAction =
   | "toggle-mode"
   | "focus-search"
   | "find-in-diff"
-  | "help";
+  | "help"
+  | "engage-files";
 
 // Spatial neighbours. Feedback sits below the diff row, so "up" from feedback
 // lands on the modified (Current) pane; the diff panes share a row.
@@ -73,6 +74,7 @@ const GLOBAL_KEYS: Readonly<Record<string, BufferAction>> = {
   s: "submit",
   m: "toggle-mode",
   f: "file-note",
+  v: "engage-files",
 };
 
 const WINDOW_KEYS: Record<WindowId, Readonly<Record<string, BufferAction>>> = {

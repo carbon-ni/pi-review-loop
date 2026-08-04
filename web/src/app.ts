@@ -740,6 +740,7 @@ const VIM_HELP = [
   "s                 submit review",
   "m                 toggle diff mode",
   "/                 search (files in sidebar, text in diff)",
+  "v                 revive file-list navigation",
   "?                 show this help",
 ].join("\n");
 
@@ -867,6 +868,14 @@ function runFindInDiff(): void {
   focusedEditor().getAction("actions.find")?.run();
 }
 
+// `v`: revive file-list navigation. Blurs whatever Tab stranded focus on
+// (a toolbar button, the diff, etc.) and points the vim layer back at the
+// sidebar so j/k walk files again. Inert while typing so the letter still types.
+function engageFileNav(): void {
+  (document.activeElement as HTMLElement | null)?.blur();
+  setFocus("sidebar");
+}
+
 function performBufferAction(action: BufferAction): void {
   switch (action) {
     case "cursor-down": moveFocusedCursor("down"); break;
@@ -882,6 +891,7 @@ function performBufferAction(action: BufferAction): void {
     case "toggle-mode": (workspace?.mode === "checkpoint" ? headButton : checkpointButton).click(); break;
     case "focus-search": searchInput.focus(); searchInput.select(); break;
     case "find-in-diff": runFindInDiff(); break;
+    case "engage-files": engageFileNav(); break;
     case "help": showHelp(); break;
     case "none": break;
   }
