@@ -4,18 +4,14 @@ local M = {}
 M.defaults = {
   -- Sidebar width in columns.
   width = 34,
-  -- Re-scan the workspace on BufWritePost (file watcher fallback).
+  -- Re-scan on BufWritePost (nvim saves) and via the repo file watcher.
   auto_refresh = true,
-  -- Called after a submit with the composed feedback and the saved checkpoint.
-  -- Default: yank feedback to the * clipboard/registers and notify.
-  on_submit = function(feedback, _checkpoint)
-    if feedback == "" then
-      vim.notify("Review checkpoint saved (no comments).", vim.log.levels.INFO)
-      return
-    end
-    vim.fn.setreg("+", feedback)
-    vim.notify("Feedback yanked to \"+. Paste it into the agent.", vim.log.levels.INFO)
-  end,
+
+  -- Where composed feedback is written on submit and :ReviewLoopSend.
+  -- nil -> a stable path under stdpath("data")/review-loop/feedback.md
+  -- (outside the worktree, so it never pollutes the diff).
+  feedback_file = nil,
+
   keymaps = {
     open_file = "<CR>",
     add_comment = "c",

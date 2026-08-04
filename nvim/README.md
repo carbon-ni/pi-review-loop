@@ -15,11 +15,15 @@ written in Neovim is readable by pi (and vice versa).
 - **Sidebar** with two sections, both following the active diff mode:
   - **Recently Changed** — flat list, newest mtime first, with comment-count badges
   - **Files** — directory tree of the same paths
-- **Two-pane diff** (`baseline | current`) on Neovim's built-in diff engine
+- **Two-pane diff** (`baseline | current`) on Neovim's built-in diff engine, with
+  winbar labels showing which pane is the baseline vs current
 - **Inline comments** as `+` sign glyphs with the comment as virtual text
+- **Live refresh** — a recursive repo watcher picks up the agent's writes; a
+  `BufWritePost` autocmd catches your own saves (recursive on macOS; top-level
+  only on Linux)
 - **Two modes**: `checkpoint` (since last review) and `head` (vs current `HEAD`)
-- **Submit** composes feedback (byte-identical to the extension) and checkpoints
-  the workspace
+- **Submit** composes feedback (byte-identical to the extension), checkpoints the
+  workspace, and **writes the feedback to a file** whose path is shown
 
 ---
 
@@ -121,9 +125,10 @@ require("review-loop").setup({ width = 40 })
 2. `:ReviewLoop` — opens a new tab with sidebar | original | modified.
 3. `<CR>` on a file in the sidebar to load its diff.
 4. `c` on a line in either pane to add an inline comment.
-5. `<leader>rs` to submit (feedback yanked to `+` by default; workspace checkpointed).
+5. `<leader>rs` to submit: the composed feedback is written to a file (path
+   shown in the notification) and the workspace is checkpointed.
 
-That's it. Keep the tab open; subsequent changes show up as the next batch.
+That's it. Keep the tab open; the watcher picks up the agent's next changes.
 
 ---
 
@@ -134,15 +139,12 @@ All fields optional — defaults shown:
 ```lua
 require("review-loop").setup({
   width = 34,            -- sidebar width in columns
-  auto_refresh = true,   -- re-scan on BufWritePost
-  on_submit = function(feedback, _checkpoint)
-    -- Default: yank feedback to the * register and notify.
-    -- Reassign to integrate with your agent however you like.
-    if feedback ~= "" then
-      vim.fn.setreg("+", feedback)
-      vim.notify("Feedback yanked to \"+. Paste it into the agent.", vim.log.levels.INFO)
-    end
-  end,
+  auto_refresh = true,   -- BufWritePost autocmd + repo file watcher
+
+  -- Where composed feedback is written on submit and :ReviewLoopSend.
+  -- nil -> stdpath("data")/review-loop/feedback.md (outside the worktree).
+  feedback_file = nil,
+
   keymaps = {
     open_file      = "<CR>",
     add_comment    = "c",
@@ -176,26 +178,50 @@ tree as the new checkpoint, composes feedback, and clears comments. Submitting
 with no comments just marks the workspace reviewed.
 
 Comment editor (the floating window): `<CR>` to save, `<Esc>` to cancel,
-`<C-Cr>` to save from insert mode.
+`<C-CR>` to save from insert mode.
 
 ---
 
-## The pi feedback loop (the one gap)
+## Commands
 
-The TypeScript extension calls `ctx.ui.pasteToEditor(feedback)` to drop the
-composed text straight into pi's editor. A standalone Neovim process can't reach
-that API, so the default `on_submit` yanks feedback to `+` for you to paste.
+Everything is also a command (scriptable / mappable) in addition to the keys:
 
-Reassign `on_submit` to integrate however you prefer — e.g. write to a file the
-agent watches, or shell out to a pi command if one exists:
+| Command | Action |
+| --- | --- |
+| `:ReviewLoop` | open the reviewer |
+| `:ReviewLoopRefresh` | re-scan now (same as `<leader>rr`) |
+| `:ReviewLoopWatch` | toggle the repo file watcher |
+| `:ReviewLoopMode` | toggle `checkpoint` ↔ `head` (same as `<leader>rm`) |
+| `:ReviewLoopFeedback` | preview composed feedback in a split |
+| `:ReviewLoopYank` | yank composed feedback to `+` |
+| `:ReviewLoopSend` | write composed feedback to the feedback file **without** checkpointing |
+| `:ReviewLoopClose` | close the reviewer |
+
+Map any of them, e.g. `vim.keymap.set("n", "<leader>ds", "<cmd>ReviewLoopSend<cr>")`.
+
+---
+
+## Delivering feedback to pi (file)
+
+The TypeScript extension calls `ctx.ui.pasteToEditor(feedback)` because it runs
+*inside* pi. This plugin is a separate process, so on submit it writes the
+composed feedback to a file and shows the path — no clipboard or tmux plumbing.
+You then forward it however you like:
+
+- paste the file's contents into pi, or
+- tell the agent to read the path (e.g. `read <path>`).
+
+The default path is `stdpath("data")/review-loop/feedback.md` (outside the
+worktree, so it never shows up in the diff). Override it with `feedback_file`:
 
 ```lua
-on_submit = function(feedback, checkpoint)
-  if feedback == "" then return end
-  io.open(vim.fn.getcwd() .. "/.review-feedback.md", "w"):write(feedback):close()
-  vim.notify("Feedback written to .review-feedback.md", vim.log.levels.INFO)
-end,
+feedback_file = "/tmp/review-loop.md",       -- any absolute path
+-- feedback_file = "./.review-feedback.md",  -- repo-local (gitignore it)
 ```
+
+`:ReviewLoopSend` writes the same file from the current comments **without**
+checkpointing (a mid-review preview). `:ReviewLoopYank` still yanks to the `+`
+register if you prefer the clipboard.
 
 ---
 

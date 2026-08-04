@@ -1,5 +1,6 @@
 -- Reviewer controller: owns windows/buffers, the WorkspaceModel, the comment
--- store, and the keymaps. One active instance per open() call.
+-- store, the keymaps, the repo file watcher, and feedback-file delivery.
+-- One active instance per open() call; M.active references it for commands.
 
 local git = require("review-loop.git")
 local checkpoint = require("review-loop.checkpoint")
@@ -14,7 +15,10 @@ local M = {}
 local NS = vim.api.nvim_create_namespace("review-loop")
 local AU_GROUP = "ReviewLoopRefresh"
 
--- open() -> controller table (or nil, errmsg on failure).
+-- Active controller; auxiliary commands operate on this.
+M.active = nil
+
+-- open() -> controller table.
 function M.open()
   local cwd = vim.fn.getcwd()
   local repo_root = git.repo_root(cwd)
@@ -33,10 +37,15 @@ function M.open()
   self.current_path = nil
   self.augroup = nil
   self.closed = false
+  self.fs = nil
+  self.watching = false
+  self._debounce = nil
   self:_layout()
   self:_keymaps()
   self:_watch()
+  self:_start_watcher()
   self:refresh()
+  M.active = self
   return self
 end
 
@@ -100,6 +109,7 @@ function M:_keymaps()
   end
 end
 
+-- BufWritePost autocmd: catches nvim's own writes instantly.
 function M:_watch()
   if not config.get().auto_refresh then
     return
@@ -117,7 +127,66 @@ function M:_watch()
   })
 end
 
--- refresh() re-scans, re-renders the sidebar, and reloads the current file.
+-- Repo file watcher: catches external writes (the agent editing files in its
+-- own process). Recursive on macOS (FSEvents); top-level only on Linux.
+local function ignored_path(path)
+  if not path then
+    return false
+  end
+  return path:find("[\\/]%.git[\\/]") ~= nil or path:find("[\\/]node_modules[\\/]") ~= nil
+end
+
+function M:_start_watcher()
+  if not config.get().auto_refresh or self.watching then
+    return
+  end
+  local uv = vim.uv or vim.loop
+  local ok, fs = pcall(uv.new_fs_event)
+  if not ok or not fs then
+    return
+  end
+  local started = pcall(function()
+    fs:start(self.repo_root, { recursive = true }, function(err, path)
+      if ignored_path(path) then
+        return
+      end
+      if err or self.closed or self._debounce then
+        return
+      end
+      self._debounce = vim.defer_fn(function()
+        self._debounce = nil
+        if not self.closed then
+          self:refresh()
+        end
+      end, 150)
+    end)
+  end)
+  if not started then
+    return
+  end
+  self.fs = fs
+  self.watching = true
+end
+
+function M:_stop_watcher()
+  if self.fs then
+    pcall(function() self.fs:stop() end)
+    self.fs = nil
+  end
+  self.watching = false
+end
+
+function M:toggle_watch()
+  if self.watching then
+    self:_stop_watcher()
+  else
+    self:_start_watcher()
+  end
+  self:_set_labels()
+  vim.notify("Review-loop watcher " .. (self.watching and "on" or "off"), vim.log.levels.INFO)
+end
+
+-- refresh() re-scans, re-renders the sidebar, reloads the current file, labels.
 function M:refresh()
   local state = self.model:refresh()
   sidebar.render(self.sidebar_buf, state, self.comments)
@@ -138,6 +207,20 @@ function M:refresh()
     self:_clear_diff()
   end
   self:_apply_extmarks()
+  self:_set_labels()
+end
+
+-- winbar labels: which pane is the baseline vs current, plus mode/watch state.
+function M:_set_labels()
+  local mode = self.model:current_mode()
+  local left = mode == "checkpoint" and "Reviewed (since review)" or "Reviewed (HEAD)"
+  local watch = self.watching and " *watching" or ""
+  local m = mode == "checkpoint" and "since review" or "vs HEAD"
+  pcall(function()
+    vim.wo[self.sidebar_win].winbar = ("%s  [%s]%s"):format(self.model:state().repoName, m, watch)
+    vim.wo[self.original_win].winbar = left
+    vim.wo[self.modified_win].winbar = "Current"
+  end)
 end
 
 function M:_diff_ctx()
@@ -185,6 +268,7 @@ function M:_open_under_cursor()
   if file then
     diffview.show(self:_diff_ctx(), file)
     self:_apply_extmarks()
+    self:_set_labels()
   end
 end
 
@@ -240,17 +324,25 @@ function M:_existing_body(path, side, line)
   return ""
 end
 
--- _upsert edits an existing same-location comment or adds a new one.
+-- _upsert edits an existing same-location comment, or adds one. A blank body
+-- removes the comment at that location (matches the editor's discard intent).
 function M:_upsert(path, side, line, body)
+  local has_text = body:match("%S") ~= nil
   for _, c in ipairs(comments_store.for_path(self.comments, path)) do
     if c.side == side and c.line == line then
-      comments_store.update(self.comments, c.id, body)
+      if has_text then
+        comments_store.update(self.comments, c.id, body)
+      else
+        comments_store.remove(self.comments, c.id)
+      end
       return
     end
   end
-  comments_store.add(self.comments, {
-    path = path, mode = self.model:current_mode(), side = side, line = line, body = body,
-  })
+  if has_text then
+    comments_store.add(self.comments, {
+      path = path, mode = self.model:current_mode(), side = side, line = line, body = body,
+    })
+  end
 end
 
 -- _apply_extmarks draws a "+" glyph on commented lines and a file-note banner.
@@ -278,10 +370,9 @@ function M:toggle_mode()
   self:refresh()
 end
 
--- submit() composes feedback, checkpoints the workspace, and hands off via config.
+-- submit() checkpoints the workspace, then delivers the composed feedback.
 function M:submit()
-  local review_comments = comments_store.to_review_comments(self.comments)
-  local composed = feedback.compose(review_comments)
+  local composed = feedback.compose(comments_store.to_review_comments(self.comments))
   local reviewed_paths = self.model:checkpoint_changed_paths()
   local ok, cp = pcall(git.create_checkpoint, self.repo_root, reviewed_paths, composed)
   if not ok then
@@ -292,44 +383,129 @@ function M:submit()
   self.model:set_checkpoint(cp)
   self.comments = comments_store.new()
   self:refresh()
-  config.get().on_submit(composed, cp)
+  self:deliver(composed)
+end
+
+-- Composed feedback from the live comment set (no checkpoint).
+function M:_composed()
+  return feedback.compose(comments_store.to_review_comments(self.comments))
+end
+
+function M:yank_feedback()
+  local fb = self:_composed()
+  if fb == "" then
+    vim.notify("No comments to yank.", vim.log.levels.WARN)
+    return
+  end
+  vim.fn.setreg("+", fb)
+  vim.notify("Feedback yanked to \"+.", vim.log.levels.INFO)
+end
+
+function M:open_feedback()
+  local fb = self:_composed()
+  vim.cmd("split")
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].filetype = "markdown"
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(fb, "\n", { plain = true }))
+  vim.api.nvim_win_set_buf(0, buf)
+  vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = buf, silent = true, desc = "Close preview" })
+  vim.notify(fb == "" and "No comments yet." or "Feedback preview (q to close).", vim.log.levels.INFO)
+end
+
+-- send_feedback() writes the current feedback file WITHOUT checkpointing.
+function M:send_feedback()
+  local fb = self:_composed()
+  if fb == "" then
+    vim.notify("No comments to send.", vim.log.levels.WARN)
+    return
+  end
+  self:deliver(fb)
+end
+
+-- deliver(fb) writes composed feedback to the feedback file and notifies the path.
+-- Paste the file's path to the agent, or tell the agent to read it.
+function M:deliver(fb)
+  if fb == "" then
+    vim.notify("Review checkpoint saved (no comments).", vim.log.levels.INFO)
+    return
+  end
+  local path = self:_feedback_path()
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+  local f = assert(io.open(path, "w"))
+  f:write(fb)
+  f:close()
+  vim.notify("Feedback written to " .. path, vim.log.levels.INFO)
+end
+
+-- _feedback_path() -> configured path, else a stable path outside the worktree.
+function M:_feedback_path()
+  local cfg = config.get()
+  if cfg.feedback_file and cfg.feedback_file ~= "" then
+    return vim.fn.expand(cfg.feedback_file)
+  end
+  return vim.fn.stdpath("data") .. "/review-loop/feedback.md"
 end
 
 function M:close()
   self.closed = true
+  self:_stop_watcher()
   if self.augroup then
     pcall(vim.api.nvim_del_augroup_by_id, self.augroup)
   end
   if self.tab and vim.api.nvim_tabpage_is_valid(self.tab) then
     pcall(vim.cmd, "tabclose " .. vim.api.nvim_tabpage_get_number(self.tab))
   end
+  if M.active == self then
+    M.active = nil
+  end
 end
 
--- _edit opens a small floating window; on_save(body) is called with the text.
+-- _edit opens a floating editor. on_save(body) runs when the window closes
+-- (closing == save) and on :w/:x, so the comment is never lost regardless of
+-- how the window is dismissed. A blank body discards the comment.
 function M:_edit(title, initial, on_save)
   local row = math.floor(vim.o.lines * 0.3)
   local col = math.floor(vim.o.columns * 0.25)
   local width = math.floor(vim.o.columns * 0.5)
   local height = 12
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].bufhidden = "wipe" -- closing the window wipes the buffer -> save
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(initial, "\n", { plain = true }))
+  vim.bo[buf].modified = false
+
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor", row = row, col = col, width = width, height = height,
-    border = "rounded", title = title, title_pos = "center", style = "minimal",
+    border = "rounded", title = title .. "  (close to save, clear to discard)",
+    title_pos = "center", style = "minimal",
   })
   vim.wo[win].signcolumn = "no"
 
-  local function save()
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local body = table.concat(lines, "\n")
-    pcall(vim.api.nvim_win_close, win, true)
-    on_save(body)
+  local function save_body()
+    local body = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    pcall(on_save, body)
   end
-  vim.keymap.set("n", "<CR>", save, { buffer = buf, silent = true, desc = "Save comment" })
-  vim.keymap.set("n", "<Esc>", function() pcall(vim.api.nvim_win_close, win, true) end,
-    { buffer = buf, silent = true, desc = "Cancel" })
-  vim.keymap.set("i", "<C-CR>", save, { buffer = buf, desc = "Save comment" })
+  -- Closing wipes the buffer -> save. Fires once, covers :q / <CR> / <Esc> / mouse.
+  vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = save_body })
+  -- :w / :x / :wq also save and clear the modified flag so quit is clean.
+  vim.api.nvim_create_autocmd("BufWriteCmd", { buffer = buf, callback = function()
+    save_body()
+    vim.bo[buf].modified = false
+  end })
+
+  local function close()
+    pcall(vim.api.nvim_win_close, win, true)
+  end
+  vim.keymap.set("n", "<CR>", close, { buffer = buf, silent = true, desc = "Save & close" })
+  vim.keymap.set("n", "q", close, { buffer = buf, silent = true, desc = "Save & close" })
+  vim.keymap.set("n", "<Esc>", close, { buffer = buf, silent = true, desc = "Save & close" })
+  vim.keymap.set("i", "<C-CR>", close, { buffer = buf, silent = true, desc = "Save & close" })
+
+  vim.cmd("startinsert")
 end
 
 return M

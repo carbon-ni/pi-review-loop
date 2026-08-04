@@ -37,6 +37,13 @@ ctrl:_apply_extmarks()
 
 -- Submit and verify persistence.
 ctrl:submit()
+-- Submit must write the composed feedback to the feedback file (no tmux/clipboard).
+local fb_path = ctrl:_feedback_path()
+local f = io.open(fb_path, "r")
+if f == nil then fail("feedback file not written: " .. fb_path) end
+local written = f:read("*a"); f:close()
+if not written:find("a.txt:2 %(current%)") then fail("feedback file missing comment: " .. written) end
+ok("feedback written to " .. fb_path)
 local cp = require("review-loop.checkpoint").load(ctrl.repo_root)
 if cp == nil then fail("checkpoint not persisted") end
 if cp.feedback == "" then fail("checkpoint feedback empty") end
@@ -50,6 +57,19 @@ ctrl:refresh()
 if #ctrl.model:checkpoint_changed_paths() ~= 0 then
   fail("expected no pending changes right after submit")
 end
+
+-- Regression: comment editor must save on close (closing via any means).
+local captured = nil
+ctrl.current_path = "a.txt"
+ctrl:_edit("t", "", function(b) captured = b end)
+-- _edit opened a floating win (now current); simulate typing then close it.
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "hello comment" })
+pcall(vim.api.nvim_win_close, 0, true)
+vim.cmd("redraw") -- let BufWipeout autocmd flush
+if captured ~= "hello comment" then
+  fail("comment editor did not save on close: " .. tostring(captured))
+end
+ok("comment editor saves on close")
 
 ctrl:close()
 ok("all good")
