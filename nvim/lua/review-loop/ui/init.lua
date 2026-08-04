@@ -74,7 +74,7 @@ function M:_layout()
   self:_apply_widths()
 end
 
--- Proportional widths: sidebar 20%, original 40%, modified fills ~40%.
+-- Proportional widths: sidebar (nav) 16%, original 42%, modified fills ~42%.
 -- Re-applied after every refresh and on VimResized so diff rendering never
 -- clobbers the layout.
 function M:_apply_widths()
@@ -82,8 +82,8 @@ function M:_apply_widths()
     return
   end
   local cols = vim.o.columns
-  pcall(vim.api.nvim_win_set_width, self.sidebar_win, math.floor(0.2 * cols))
-  pcall(vim.api.nvim_win_set_width, self.original_win, math.floor(0.4 * cols))
+  pcall(vim.api.nvim_win_set_width, self.sidebar_win, math.floor(0.16 * cols))
+  pcall(vim.api.nvim_win_set_width, self.original_win, math.floor(0.42 * cols))
 end
 
 function M:_scratch(name, listed)

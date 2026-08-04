@@ -58,20 +58,20 @@ if #ctrl.model:checkpoint_changed_paths() ~= 0 then
   fail("expected no pending changes right after submit")
 end
 
--- Layout: sidebar 20%, original 40%; both diff panes scroll together.
+-- Layout: sidebar (nav) 16%, original 42%; both diff panes scroll together.
 local cols = vim.o.columns
 local sw = vim.api.nvim_win_get_width(ctrl.sidebar_win)
 local ow = vim.api.nvim_win_get_width(ctrl.original_win)
-if math.abs(sw - math.floor(0.2 * cols)) > 2 then
-  fail(string.format("sidebar width %d ~= 20%% of %d", sw, cols))
+if math.abs(sw - math.floor(0.16 * cols)) > 2 then
+  fail(string.format("sidebar width %d ~= 16%% of %d", sw, cols))
 end
-if math.abs(ow - math.floor(0.4 * cols)) > 2 then
-  fail(string.format("original width %d ~= 40%% of %d", ow, cols))
+if math.abs(ow - math.floor(0.42 * cols)) > 2 then
+  fail(string.format("original width %d ~= 42%% of %d", ow, cols))
 end
 if not (vim.wo[ctrl.original_win].scrollbind and vim.wo[ctrl.modified_win].scrollbind) then
   fail("diff panes do not have scrollbind set")
 end
-ok(string.format("layout 20/40/40 + scrollbind (cols=%d)", cols))
+ok(string.format("layout 16/42/42 + scrollbind (cols=%d)", cols))
 
 -- Regression: comment editor must save on close (closing via any means).
 local captured = nil
