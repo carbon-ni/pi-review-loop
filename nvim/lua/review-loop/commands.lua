@@ -36,6 +36,8 @@ function M.setup()
       desc = "Write composed feedback to the feedback file (no checkpoint)",
     },
     ReviewLoopClose = { fn = function(c) c:close() end, desc = "Close the reviewer" },
+    ReviewLoopNextComment = { fn = function(c) c:next_comment() end, desc = "Jump to next comment" },
+    ReviewLoopPrevComment = { fn = function(c) c:prev_comment() end, desc = "Jump to previous comment" },
   }
   for name, spec in pairs(cmds) do
     vim.api.nvim_create_user_command(name, with_active(spec.fn, name), { desc = spec.desc })

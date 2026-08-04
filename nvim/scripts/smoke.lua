@@ -86,6 +86,27 @@ if captured ~= "hello comment" then
 end
 ok("comment editor saves on close")
 
+-- next_comment / prev_comment jump between comments and wrap.
+-- Re-dirty a.txt so the diff buffer has lines to jump within (submit cleared it).
+write("a.txt", "line1\nline2\nline3\n")
+ctrl:refresh()
+do
+  local cs = require("review-loop.ui.comments")
+  ctrl.current_path = "a.txt"
+  cs.add(ctrl.comments, { path = "a.txt", mode = "checkpoint", side = "modified", line = 1, body = "one" })
+  cs.add(ctrl.comments, { path = "a.txt", mode = "checkpoint", side = "modified", line = 2, body = "two" })
+  ctrl:_apply_extmarks()
+  vim.api.nvim_set_current_win(ctrl.modified_win)
+  vim.api.nvim_win_set_cursor(ctrl.modified_win, { 1, 0 })
+  ctrl:next_comment()
+  local l1 = vim.api.nvim_win_get_cursor(ctrl.modified_win)[1]
+  if l1 ~= 2 then fail("next_comment expected line 2 got " .. l1) end
+  ctrl:next_comment() -- wraps to first
+  local l2 = vim.api.nvim_win_get_cursor(ctrl.modified_win)[1]
+  if l2 ~= 1 then fail("next_comment wrap expected line 1 got " .. l2) end
+  ok("next_comment jumps + wraps")
+end
+
 ctrl:close()
 ok("all good")
 print("SMOKE DONE")

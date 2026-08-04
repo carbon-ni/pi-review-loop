@@ -111,6 +111,8 @@ function M:_keymaps()
   for _, buf in ipairs({ self.original_buf, self.modified_buf }) do
     map(buf, km.add_comment, function() self:_comment_under_cursor() end, "Add/edit comment")
     map(buf, km.delete_comment, function() self:_delete_under_cursor() end, "Delete comment")
+    map(buf, km.next_comment, function() self:next_comment() end, "Next comment")
+    map(buf, km.prev_comment, function() self:prev_comment() end, "Previous comment")
     map(buf, km.refresh, function() self:refresh() end, "Refresh")
     map(buf, km.submit, function() self:submit() end, "Submit review")
     map(buf, km.toggle_mode, function() self:toggle_mode() end, "Toggle diff mode")
@@ -380,6 +382,62 @@ function M:_apply_extmarks()
       end
     end
   end
+end
+
+-- Jump to the next/previous line comment in the current file (wraps around).
+-- Lands on the comment's pane (switching side if needed) and centers it.
+function M:_goto_comment(c)
+  local win = (c.side == "original") and self.original_win or self.modified_win
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_set_current_win(win)
+    pcall(vim.api.nvim_win_set_cursor, win, { math.max(1, c.line or 1), 0 })
+    pcall(vim.api.nvim_win_call, win, function() vim.cmd("normal! zz") end)
+  end
+end
+
+function M:_jump_comment(direction)
+  if self.current_path == nil then
+    return
+  end
+  local cur_line = vim.api.nvim_win_get_cursor(vim.api.nvim_get_current_win())[1]
+  local items = {}
+  for _, c in ipairs(comments_store.for_path(self.comments, self.current_path)) do
+    if c.line and c.body:match("%S") then
+      items[#items + 1] = c
+    end
+  end
+  if #items == 0 then
+    vim.notify("No comments in " .. self.current_path, vim.log.levels.INFO)
+    return
+  end
+  table.sort(items, function(a, b) return (a.line or 0) < (b.line or 0) end)
+  local target
+  if direction >= 0 then
+    for _, c in ipairs(items) do
+      if (c.line or 0) > cur_line then
+        target = c
+        break
+      end
+    end
+    target = target or items[1]
+  else
+    for i = #items, 1, -1 do
+      if (items[i].line or 0) < cur_line then
+        target = items[i]
+        break
+      end
+    end
+    target = target or items[#items]
+  end
+  self:_goto_comment(target)
+end
+
+function M:next_comment()
+  self:_jump_comment(1)
+end
+
+function M:prev_comment()
+  self:_jump_comment(-1)
 end
 
 function M:toggle_mode()
