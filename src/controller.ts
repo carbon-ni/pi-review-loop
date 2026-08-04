@@ -10,6 +10,20 @@ import { WorkspaceModel } from "./workspace.js";
 
 export const CHECKPOINT_ENTRY = "review-loop/checkpoint";
 
+/**
+ * Top-level directories that must never be watched. These are VCS metadata,
+ * installed dependencies, or pi runtime state (sockets, sqlite, sessions).
+ * Scanning them is wasteful and, for `.pi/intray`, fatal: its `.alias` symlinks
+ * point at Unix sockets and make readdirp throw EOPNOTSUPP, which kills pi.
+ */
+const IGNORED_TOP_LEVEL = [".git", "node_modules", ".pi"];
+
+export function isWatchIgnored(repoRoot: string, path: string): boolean {
+  const rel = relative(repoRoot, path);
+  if (!rel || rel === ".." || rel.startsWith(`..${sep}`)) return false;
+  return IGNORED_TOP_LEVEL.some((prefix) => rel === prefix || rel.startsWith(`${prefix}${sep}`));
+}
+
 function isCheckpoint(value: unknown): value is ReviewCheckpoint {
   if (value == null || typeof value !== "object") return false;
   const item = value as Partial<ReviewCheckpoint>;
@@ -63,7 +77,7 @@ export class ReviewController {
     this.repoRoot = await getRepoRoot(this.pi, ctx.cwd);
     this.model = await WorkspaceModel.create(this.pi, this.repoRoot, latestCheckpoint(ctx, this.repoRoot));
     await this.model.refresh();
-    await this.startWatcher();
+    await this.startWatcher(ctx);
 
     const window = open(loadReviewHtml(), { width: 1480, height: 920, title: "Review Loop" });
     this.window = window;
@@ -90,17 +104,19 @@ export class ReviewController {
     try { window?.close(); } catch {}
   }
 
-  private async startWatcher(): Promise<void> {
+  private async startWatcher(ctx: ExtensionCommandContext): Promise<void> {
     this.watcher = watch(this.repoRoot, {
       ignoreInitial: true,
-      ignored: (path) => {
-        const rel = relative(this.repoRoot, path);
-        return rel === ".git" || rel.startsWith(`.git${sep}`) || rel === "node_modules" || rel.startsWith(`node_modules${sep}`);
-      },
+      ignored: (path: string) => isWatchIgnored(this.repoRoot, path),
+    });
+    // readdirp/chokidar re-emit non-benign fs errors here; without a listener
+    // an unhandled 'error' event would crash the whole pi process.
+    this.watcher.on("error", (error) => {
+      ctx.ui.notify(`Review Loop file watcher failed: ${error instanceof Error ? error.message : String(error)}`, "error");
     });
     this.watcher.on("all", (_event, path) => {
       const repoPath = this.toRepoPath(path);
-      if (repoPath == null) return;
+      if (repoPath == null || isWatchIgnored(this.repoRoot, path)) return;
       this.scheduleRefresh();
     });
   }
