@@ -550,21 +550,25 @@ function M:_edit(title, initial, on_save)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].swapfile = false
   vim.bo[buf].bufhidden = "wipe" -- closing the window wipes the buffer -> save
+  vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(initial, "\n", { plain = true }))
   vim.bo[buf].modified = false
 
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor", row = row, col = col, width = width, height = height,
-    border = "rounded", title = title .. "  (close to save, clear to discard)",
-    title_pos = "center", style = "minimal",
+    border = "rounded",
+    title = title .. "  (:w save | :x save&close | clear to discard)",
+    title_pos = "center",
   })
   vim.wo[win].signcolumn = "no"
+  vim.wo[win].cursorline = true
+  vim.wo[win].wrap = true
 
   local function save_body()
     local body = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     pcall(on_save, body)
   end
-  -- Closing wipes the buffer -> save. Fires once, covers :q / <CR> / <Esc> / mouse.
+  -- Closing wipes the buffer -> save. Fires once, covers :q / <CR> / mouse.
   vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = save_body })
   -- :w / :x / :wq also save and clear the modified flag so quit is clean.
   vim.api.nvim_create_autocmd("BufWriteCmd", { buffer = buf, callback = function()
@@ -572,15 +576,15 @@ function M:_edit(title, initial, on_save)
     vim.bo[buf].modified = false
   end })
 
+  -- Opens in NORMAL mode so motions/operators work immediately (vim-like):
+  -- press i/a/o to insert, <Esc> to leave insert. <CR>/q close (save);
+  -- :w/:x/:q are stock vim. Clearing the text and closing discards the comment.
   local function close()
     pcall(vim.api.nvim_win_close, win, true)
   end
   vim.keymap.set("n", "<CR>", close, { buffer = buf, silent = true, desc = "Save & close" })
   vim.keymap.set("n", "q", close, { buffer = buf, silent = true, desc = "Save & close" })
-  vim.keymap.set("n", "<Esc>", close, { buffer = buf, silent = true, desc = "Save & close" })
   vim.keymap.set("i", "<C-CR>", close, { buffer = buf, silent = true, desc = "Save & close" })
-
-  vim.cmd("startinsert")
 end
 
 return M

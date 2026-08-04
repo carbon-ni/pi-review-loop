@@ -177,8 +177,10 @@ Submitting marks all currently-changed paths reviewed, snapshots the working
 tree as the new checkpoint, composes feedback, and clears comments. Submitting
 with no comments just marks the workspace reviewed.
 
-Comment editor (the floating window): `<CR>` to save, `<Esc>` to cancel,
-`<C-CR>` to save from insert mode.
+Comment editor: a normal vim buffer — motions, operators, and `:w` / `:x` / `:q`
+all work. It opens in **normal mode** (press `i`/`a`/`o` to insert, `<Esc>` to
+leave insert). `<CR>` or `q` saves & closes; `:w` saves without closing.
+Clear the text and close to discard the comment.
 
 ---
 
