@@ -15,6 +15,16 @@ describe("feedback.location", function()
     eq("a.go:5 (HEAD)", feedback.location({ path = "a.go", side = "original", line = 5, mode = "head" }))
     eq("a.go:5 (reviewed)", feedback.location({ path = "a.go", side = "original", line = 5, mode = "checkpoint" }))
   end)
+
+  it("renders a line range as path:start-end", function()
+    eq("a.go:5-8 (HEAD)",
+      feedback.location({ path = "a.go", side = "original", line = 5, line_end = 8, mode = "head" }))
+  end)
+
+  it("renders a single line when line_end equals line", function()
+    eq("a.go:5 (current)",
+      feedback.location({ path = "a.go", side = "modified", line = 5, line_end = 5, mode = "checkpoint" }))
+  end)
 end)
 
 describe("feedback.compose", function()

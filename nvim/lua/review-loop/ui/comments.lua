@@ -1,5 +1,6 @@
 -- In-memory review comment store. Pure logic; no nvim APIs.
--- A comment: { id, path, mode, side = "original"|"modified"|"file", line = number|nil, body }.
+-- A comment: { id, path, mode, side = "original"|"modified"|"file", line = number|nil, line_end = number|nil, body }.
+-- line_end > line marks a line-range comment (visual selection).
 -- The UI binds extmarks to ids; compose() consumes the ReviewComment projection.
 
 local M = {}
@@ -15,15 +16,19 @@ end
 
 -- add(store, comment) -> id. Normalizes a file-level comment to line = nil.
 function M.add(store, comment)
-  local line = nil
+  local line, line_end = nil, nil
   if comment.side ~= "file" then
     line = comment.line
+    if comment.line_end and comment.line_end > (comment.line or 0) then
+      line_end = comment.line_end
+    end
   end
   local c = {
     path = comment.path,
     mode = comment.mode,
     side = comment.side,
     line = line,
+    line_end = line_end,
     body = comment.body or "",
   }
   local id = next_id(store)
@@ -93,6 +98,7 @@ function M.to_review_comments(store)
         mode = c.mode,
         side = c.side,
         line = c.line,
+        line_end = c.line_end,
         body = c.body,
       }
     end

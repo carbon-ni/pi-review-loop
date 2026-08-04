@@ -99,6 +99,9 @@ function M:_keymaps()
   local function map(buf, lhs, fn, desc)
     vim.keymap.set("n", lhs, fn, { buffer = buf, silent = true, desc = desc })
   end
+  local function vmap(buf, lhs, fn, desc)
+    vim.keymap.set("v", lhs, fn, { buffer = buf, silent = true, desc = desc })
+  end
 
   local sb = self.sidebar_buf
   map(sb, km.open_file, function() self:_open_under_cursor() end, "Open file under cursor")
@@ -110,6 +113,7 @@ function M:_keymaps()
 
   for _, buf in ipairs({ self.original_buf, self.modified_buf }) do
     map(buf, km.add_comment, function() self:_comment_under_cursor() end, "Add/edit comment")
+    vmap(buf, km.add_comment, function() self:_comment_on_selection() end, "Comment selected lines")
     map(buf, km.delete_comment, function() self:_delete_under_cursor() end, "Delete comment")
     map(buf, km.next_comment, function() self:next_comment() end, "Next comment")
     map(buf, km.prev_comment, function() self:prev_comment() end, "Previous comment")
@@ -309,11 +313,46 @@ function M:_comment_under_cursor()
   local win = vim.api.nvim_get_current_win()
   local side = win == self.original_win and "original" or "modified"
   local line = vim.api.nvim_win_get_cursor(win)[1]
-  self:_edit(string.format("%s:%d (%s)", self.current_path, line, side),
-    self:_existing_body(self.current_path, side, line), function(body)
-      self:_upsert(self.current_path, side, line, body)
+  self:_open_comment(side, line, line)
+end
+
+-- Visual selection (V / char): comment the range path:start-end.
+function M:_comment_on_selection()
+  if self.current_path == nil then
+    return
+  end
+  local win = vim.api.nvim_get_current_win()
+  local side = win == self.original_win and "original" or "modified"
+  local s, e = vim.fn.line("'<"), vim.fn.line("'>")
+  if s > e then
+    s, e = e, s
+  end
+  self:_open_comment(side, s, e)
+end
+
+function M:_open_comment(side, line_start, line_end)
+  local le = (line_end and line_end > line_start) and line_end or nil
+  local where = tostring(line_start)
+  if le then
+    where = line_start .. "-" .. le
+  end
+  local target_win = side == "original" and self.original_win or self.modified_win
+  local target_line = line_start
+  self:_edit(string.format("%s:%s (%s)", self.current_path, where, side),
+    self:_existing_body(self.current_path, side, line_start, le), function(body)
+      self:_upsert(self.current_path, side, line_start, le, body)
       self:_apply_extmarks()
       sidebar.render(self.sidebar_buf, self.model:state(), self.comments)
+      -- After the popup closes, return to the line we just commented on.
+      -- Counters the diff pane jumping away (e.g. to the bottom) on close.
+      vim.schedule(function()
+        if self.closed or not (target_win and vim.api.nvim_win_is_valid(target_win)) then
+          return
+        end
+        pcall(vim.api.nvim_set_current_win, target_win)
+        pcall(vim.api.nvim_win_set_cursor, target_win, { math.max(1, target_line), 0 })
+        pcall(vim.api.nvim_win_call, target_win, function() vim.cmd("normal! zz") end)
+      end)
     end)
 end
 
@@ -325,7 +364,10 @@ function M:_delete_under_cursor()
   local side = win == self.original_win and "original" or "modified"
   local line = vim.api.nvim_win_get_cursor(win)[1]
   for _, c in ipairs(comments_store.for_path(self.comments, self.current_path)) do
-    if c.side == side and c.line == line then
+    local lo = c.line or 0
+    local hi = c.line_end or c.line or 0
+    if lo > hi then lo, hi = hi, lo end
+    if c.side == side and line >= lo and line <= hi then
       comments_store.remove(self.comments, c.id)
       self:_apply_extmarks()
       sidebar.render(self.sidebar_buf, self.model:state(), self.comments)
@@ -334,9 +376,9 @@ function M:_delete_under_cursor()
   end
 end
 
-function M:_existing_body(path, side, line)
+function M:_existing_body(path, side, line, line_end)
   for _, c in ipairs(comments_store.for_path(self.comments, path)) do
-    if c.side == side and c.line == line then
+    if c.side == side and c.line == line and (c.line_end or line) == (line_end or line) then
       return c.body
     end
   end
@@ -345,10 +387,10 @@ end
 
 -- _upsert edits an existing same-location comment, or adds one. A blank body
 -- removes the comment at that location (matches the editor's discard intent).
-function M:_upsert(path, side, line, body)
+function M:_upsert(path, side, line, line_end, body)
   local has_text = body:match("%S") ~= nil
   for _, c in ipairs(comments_store.for_path(self.comments, path)) do
-    if c.side == side and c.line == line then
+    if c.side == side and c.line == line and (c.line_end or line) == (line_end or line) then
       if has_text then
         comments_store.update(self.comments, c.id, body)
       else
@@ -359,7 +401,8 @@ function M:_upsert(path, side, line, body)
   end
   if has_text then
     comments_store.add(self.comments, {
-      path = path, mode = self.model:current_mode(), side = side, line = line, body = body,
+      path = path, mode = self.model:current_mode(), side = side,
+      line = line, line_end = line_end, body = body,
     })
   end
 end
@@ -373,11 +416,18 @@ function M:_apply_extmarks()
   end
   for _, c in ipairs(comments_store.for_path(self.comments, self.current_path)) do
     if c.body:match("%S") then
-      local opts = { sign_text = "+", priority = 20, virt_text = { { c.body, "Comment" } } }
+      local label = c.body
+      if c.line_end and c.line_end > (c.line or 0) then
+        label = string.format("[%d-%d] %s", c.line, c.line_end, c.body)
+      end
+      local opts = { sign_text = "+", priority = 20, virt_text = { { label, "Comment" } } }
       if c.side == "file" then
         vim.api.nvim_buf_set_extmark(self.modified_buf, NS, 0, 0, opts)
       elseif c.line then
         local buf = c.side == "original" and self.original_buf or self.modified_buf
+        if c.line_end and c.line_end > (c.line or 0) then
+          opts.end_row = math.max(0, c.line_end - 1)
+        end
         pcall(vim.api.nvim_buf_set_extmark, buf, NS, math.max(0, c.line - 1), 0, opts)
       end
     end

@@ -31,8 +31,9 @@ local state = ctrl.model:state()
 if #state.files == 0 then fail("no changed files after open") end
 ok(#state.files .. " changed file(s); mode=" .. state.mode)
 
--- Simulate adding an inline comment on the modified pane, line 2.
-ctrl:_upsert("a.txt", "modified", 2, "new line needs a test")
+-- Simulate comments: a single line and a visual line-range.
+ctrl:_upsert("a.txt", "modified", 2, nil, "new line needs a test")
+ctrl:_upsert("a.txt", "modified", 1, 2, "watch the range")
 ctrl:_apply_extmarks()
 
 -- Submit and verify persistence.
@@ -42,12 +43,14 @@ local fb_path = ctrl:_feedback_path()
 local f = io.open(fb_path, "r")
 if f == nil then fail("feedback file not written: " .. fb_path) end
 local written = f:read("*a"); f:close()
-if not written:find("a.txt:2 %(current%)") then fail("feedback file missing comment: " .. written) end
+if not written:find("a.txt:2 %(current%)") then fail("feedback file missing single-line comment: " .. written) end
+if not written:find("a%.txt:1%-2 %(current%)") then fail("feedback file missing range comment: " .. written) end
 ok("feedback written to " .. fb_path)
 local cp = require("review-loop.checkpoint").load(ctrl.repo_root)
 if cp == nil then fail("checkpoint not persisted") end
 if cp.feedback == "" then fail("checkpoint feedback empty") end
-if not cp.feedback:find("a.txt:2 %(current%)") then fail("feedback missing comment: " .. tostring(cp.feedback)) end
+if not cp.feedback:find("a.txt:2 %(current%)") then fail("feedback missing single-line comment: " .. tostring(cp.feedback)) end
+if not cp.feedback:find("a%.txt:1%-2 %(current%)") then fail("feedback missing range comment: " .. tostring(cp.feedback)) end
 if cp.headSha == nil or cp.headSha == "" then fail("checkpoint headSha missing") end
 ok("checkpoint saved; headSha=" .. cp.headSha:sub(1, 8))
 ok("feedback:\n" .. cp.feedback)
@@ -105,6 +108,21 @@ do
   local l2 = vim.api.nvim_win_get_cursor(ctrl.modified_win)[1]
   if l2 ~= 1 then fail("next_comment wrap expected line 1 got " .. l2) end
   ok("next_comment jumps + wraps")
+end
+
+-- Closing the comment popup returns the cursor to the commented line.
+do
+  ctrl.current_path = "a.txt"
+  vim.api.nvim_set_current_win(ctrl.modified_win)
+  vim.api.nvim_win_set_cursor(ctrl.modified_win, { 1, 0 })
+  ctrl:_open_comment("modified", 2, 2)
+  pcall(vim.api.nvim_win_close, 0, true) -- close the popup (saves)
+  vim.wait(50) -- let the scheduled cursor restore run
+  local l = vim.api.nvim_win_get_cursor(ctrl.modified_win)[1]
+  if l ~= 2 then
+    fail("comment popup should return cursor to line 2, got " .. l)
+  end
+  ok("comment popup returns to commented line")
 end
 
 ctrl:close()

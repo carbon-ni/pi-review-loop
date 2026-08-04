@@ -124,7 +124,8 @@ require("review-loop").setup({ width = 40 })
 1. `cd` into a Git repository with uncommitted changes.
 2. `:ReviewLoop` — opens a new tab with sidebar | original | modified.
 3. `<CR>` on a file in the sidebar to load its diff.
-4. `c` on a line in either pane to add an inline comment.
+4. `c` on a line in either pane to add an inline comment, or select lines
+   (`V`) and press `c` to comment the whole range.
 5. `<leader>rs` to submit: the composed feedback is written to a file (path
    shown in the notification) and the workspace is checkpointed.
 
@@ -166,6 +167,7 @@ require("review-loop").setup({
 | --- | --- | --- |
 | Open file under cursor | `<CR>` | sidebar |
 | Add / edit inline comment | `c` | diff pane |
+| Comment a line range | `c` (visual) | diff pane |
 | Delete comment on this line | `x` | diff pane |
 | Add file-level note | `n` | sidebar |
 | **Submit review** | `<leader>rs` | anywhere |

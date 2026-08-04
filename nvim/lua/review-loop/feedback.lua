@@ -19,7 +19,11 @@ local function location(comment)
   else
     suffix = " (current)"
   end
-  return comment.path .. ":" .. tostring(comment.line) .. suffix
+  local where = tostring(comment.line)
+  if comment.line_end and comment.line_end > comment.line then
+    where = comment.line .. "-" .. comment.line_end
+  end
+  return comment.path .. ":" .. where .. suffix
 end
 
 -- compose(comments) -> string
