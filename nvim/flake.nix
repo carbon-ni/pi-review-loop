@@ -8,7 +8,11 @@
   inputs.plenary-nvim.url = "github:nvim-lua/plenary.nvim";
   inputs.plenary-nvim.flake = false;
 
-  outputs = { self, nixpkgs, plenary-nvim }:
+  # Runtime view dependency, pinned for smoke and integration tests.
+  inputs.diffview-nvim.url = "github:sindrets/diffview.nvim";
+  inputs.diffview-nvim.flake = false;
+
+  outputs = { self, nixpkgs, plenary-nvim, diffview-nvim }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
@@ -27,8 +31,9 @@
               gzip # checkpoint content codec
             ];
 
-            # Exposed to the shell; scripts/test + minimal_init.vim consume it.
+            # Exposed to the shell; test scripts consume the pinned plugins.
             PLENARY_PATH = "${plenary-nvim}";
+            DIFFVIEW_PATH = "${diffview-nvim}";
           };
         });
 

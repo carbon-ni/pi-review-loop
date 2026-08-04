@@ -4,6 +4,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."   # -> nvim/
 
 export REVIEW_LOOP_ROOT="$PWD"
+export DIFFVIEW_PATH="${DIFFVIEW_PATH:-$HOME/.local/share/nvim/lazy/diffview.nvim}"
+
+if [[ ! -d "$DIFFVIEW_PATH" ]]; then
+  echo "diffview.nvim not found at $DIFFVIEW_PATH" >&2
+  exit 1
+fi
+
 exec nvim --headless -u NONE \
+  +"set rtp+=$DIFFVIEW_PATH" \
   +"set rtp+=$PWD" \
   -c "luafile scripts/smoke.lua" +qa

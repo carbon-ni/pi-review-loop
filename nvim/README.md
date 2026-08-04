@@ -12,11 +12,9 @@ written in Neovim is readable by pi (and vice versa).
 
 ## What you get
 
-- **Sidebar** with two sections, both following the active diff mode:
-  - **Recently Changed** — flat list, newest mtime first, with comment-count badges
-  - **Files** — directory tree of the same paths
-- **Two-pane diff** (`baseline | current`) on Neovim's built-in diff engine, with
-  winbar labels showing which pane is the baseline vs current
+- **Diffview file panel** for tree/list navigation, file status, folds, and layout controls;
+  the newest changed file is selected initially
+- **Two-pane Diffview** (`baseline | current`) with review-loop winbar labels
 - **Inline comments** as `+` sign glyphs with the comment as virtual text
 - **Live refresh** — a recursive repo watcher picks up the agent's writes; a
   `BufWritePost` autocmd catches your own saves (recursive on macOS; top-level
@@ -34,7 +32,8 @@ written in Neovim is readable by pi (and vice versa).
 | Neovim ≥ 0.10 | `vim.system`, extmark `sign_text`, `vim.base64` | `nvim --version` |
 | `git` | diffing, checkpointing | `git --version` |
 | `gzip` + `base64` | checkpoint content codec | `command -v gzip base64` |
-| `plenary.nvim` | **tests only** — not required to use the plugin | `:messages` after install |
+| `sindrets/diffview.nvim` | Runtime file panel and diff view | `:DiffviewOpen` |
+| `plenary.nvim` | **tests only** — not required at runtime | `:messages` after install |
 
 ---
 
@@ -46,7 +45,7 @@ written in Neovim is readable by pi (and vice versa).
 
 ### lazy.nvim — recommended
 
-**Minimal (runtime only, no dependencies):**
+**Minimal runtime setup:**
 
 ```lua
 {
@@ -55,6 +54,10 @@ written in Neovim is readable by pi (and vice versa).
   main = "review-loop",                -- require("review-loop")
   opts = {},                           -- calls require("review-loop").setup({})
   cmd = "ReviewLoop",                  -- load when you run :ReviewLoop
+  dependencies = {
+    { "sindrets/diffview.nvim" },
+    { "nvim-tree/nvim-web-devicons" }, -- optional Diffview icons
+  },
   keys = {
     { "<leader>dr", "<cmd>ReviewLoop<cr>", desc = "Open review loop" },
   },
@@ -75,8 +78,9 @@ automatically (it defaults to lazy's install path):
   opts = {},
   cmd = "ReviewLoop",
   dependencies = {
-    -- Powers the test suite only; safe to remove if you never run tests.
-    { "nvim-lua/plenary.nvim" },
+    { "sindrets/diffview.nvim" },
+    { "nvim-tree/nvim-web-devicons" }, -- optional Diffview icons
+    { "nvim-lua/plenary.nvim" },       -- test suite only
   },
   -- Optional: run the suite after install/update (build runs inside dir = nvim/).
   build = "./scripts/test",
@@ -97,7 +101,11 @@ use {
   "earendil-works/pi-review-loop",
   -- packer adds the repo root to rtp; expose the nvim/ subdir:
   rtp = "nvim",
-  requires = { "nvim-lua/plenary.nvim" }, -- optional, tests only
+  requires = {
+    "sindrets/diffview.nvim",
+    "nvim-tree/nvim-web-devicons", -- optional Diffview icons
+    "nvim-lua/plenary.nvim",       -- tests only
+  },
   config = function()
     require("review-loop").setup({})
   end,
@@ -108,13 +116,14 @@ use {
 
 ```sh
 ln -s "$PWD/nvim" ~/.local/share/nvim/site/pack/review-loop/start/review-loop.nvim
+# Install sindrets/diffview.nvim under pack/*/start as well.
 ```
 
 `plugin/review-loop.lua` is sourced at startup, so `:ReviewLoop` is available
 with **zero config**. To customize, add to your `init.lua`:
 
 ```lua
-require("review-loop").setup({ width = 40 })
+require("review-loop").setup({ auto_refresh = true })
 ```
 
 ---
@@ -122,8 +131,8 @@ require("review-loop").setup({ width = 40 })
 ## First run
 
 1. `cd` into a Git repository with uncommitted changes.
-2. `:ReviewLoop` — opens a new tab with sidebar | original | modified.
-3. `<CR>` on a file in the sidebar to load its diff.
+2. `:ReviewLoop` — opens a Diffview tab with file panel | reviewed | current.
+3. `<CR>` on a file in Diffview's panel to load its diff.
 4. `c` on a line in either pane to add an inline comment, or select lines
    (`V`) and press `c` to comment the whole range.
 5. `<leader>rs` to submit: the composed feedback is written to a file (path
@@ -139,7 +148,6 @@ All fields optional — defaults shown:
 
 ```lua
 require("review-loop").setup({
-  width = 34,            -- sidebar width in columns
   auto_refresh = true,   -- BufWritePost autocmd + repo file watcher
 
   -- Where composed feedback is written on submit and :ReviewLoopSend.
@@ -147,9 +155,8 @@ require("review-loop").setup({
   feedback_file = nil,
 
   keymaps = {
-    open_file      = "<CR>",
     add_comment    = "c",
-    add_file_note  = "n",
+    add_file_note  = "<leader>rn",
     delete_comment = "x",
     submit         = "<leader>rs",
     toggle_mode    = "<leader>rm",
@@ -165,15 +172,15 @@ require("review-loop").setup({
 
 | Action | Default | Where |
 | --- | --- | --- |
-| Open file under cursor | `<CR>` | sidebar |
+| Open file under cursor | `<CR>` | Diffview file panel |
 | Add / edit inline comment | `c` | diff pane |
 | Comment a line range | `c` (visual) | diff pane |
 | Delete comment on this line | `x` | diff pane |
-| Add file-level note | `n` | sidebar |
+| Add file-level note | `<leader>rn` | Diffview file panel |
 | **Submit review** | `<leader>rs` | anywhere |
 | Toggle `checkpoint` ↔ `head` mode | `<leader>rm` | anywhere |
 | Force refresh | `<leader>rr` | anywhere |
-| Close | `q` | sidebar |
+| Close | `q` | Diffview file panel |
 
 Submitting marks all currently-changed paths reviewed, snapshots the working
 tree as the new checkpoint, composes feedback, and clears comments. Submitting
@@ -242,7 +249,7 @@ implementations read each other's checkpoints.
 
 ```sh
 cd nvim
-./scripts/test     # plenary unit suite (43 tests): feedback, checkpoint, git, state, comments, UI
+./scripts/test     # plenary unit suite (47 tests): Diffview adapter, feedback, checkpoint, git, state, comments, UI
 ./scripts/lint     # luacheck over lua/ and tests/
 ./scripts/smoke    # headless end-to-end: open → comment → submit → checkpoint
 ```
@@ -256,8 +263,8 @@ exercise.
 
 ## Development (Nix)
 
-A `flake.nix` provides a reproducible dev shell with a pinned **neovim**,
-**plenary**, and **luacheck** — no local setup or lazy install required:
+A `flake.nix` provides a reproducible dev shell with pinned **neovim**,
+**Diffview**, **plenary**, and **luacheck** — no local setup or lazy install required:
 
 ```sh
 cd nvim
@@ -266,9 +273,9 @@ nix develop            # enter the shell
 ./scripts/lint
 ```
 
-`PLENARY_PATH` is exported by the shell to the flake-pinned plenary source, so
-`scripts/test` is fully deterministic. `nix fmt` formats Nix files; `nix flake
-lock --update-input nixpkgs` bumps Neovim/plenary.
+`PLENARY_PATH` and `DIFFVIEW_PATH` point at flake-pinned sources, so tests are
+deterministic. `nix fmt` formats Nix files; `nix flake lock --update-input
+nixpkgs` bumps Neovim while plugin inputs remain pinned.
 
 > **Why plenary, not standalone `busted`?** Every module touches the `vim.*`
 > API at load time (`vim.system`, `vim.uv`, `vim.fn`), so the test runner must

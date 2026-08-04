@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."   # -> nvim/
 
 export REVIEW_LOOP_ROOT="$PWD"
 export PLENARY_PATH="${PLENARY_PATH:-$HOME/.local/share/nvim/lazy/plenary.nvim}"
+export DIFFVIEW_PATH="${DIFFVIEW_PATH:-$HOME/.local/share/nvim/lazy/diffview.nvim}"
 
 exec nvim --headless \
   +"lua require('plenary.test_harness').test_directory('tests/', { minimal_init = 'tests/minimal_init.vim' })" \

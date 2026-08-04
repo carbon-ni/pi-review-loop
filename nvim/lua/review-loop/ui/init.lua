@@ -1,6 +1,5 @@
--- Reviewer controller: owns windows/buffers, the WorkspaceModel, the comment
--- store, the keymaps, the repo file watcher, and feedback-file delivery.
--- One active instance per open() call; M.active references it for commands.
+-- Reviewer controller: review-loop owns model/comments/feedback while
+-- diffview.nvim owns the file panel, diff buffers, and window lifecycle.
 
 local git = require("review-loop.git")
 local checkpoint = require("review-loop.checkpoint")
@@ -8,17 +7,14 @@ local Model = require("review-loop.state").WorkspaceModel
 local feedback = require("review-loop.feedback")
 local config = require("review-loop.config")
 local comments_store = require("review-loop.ui.comments")
-local sidebar = require("review-loop.ui.sidebar")
 local diffview = require("review-loop.ui.diff")
 
 local M = {}
 local NS = vim.api.nvim_create_namespace("review-loop")
 local AU_GROUP = "ReviewLoopRefresh"
 
--- Active controller; auxiliary commands operate on this.
 M.active = nil
 
--- open() -> controller table.
 function M.open()
   local cwd = vim.fn.getcwd()
   local repo_root = git.repo_root(cwd)
@@ -26,101 +22,76 @@ function M.open()
     repo_root = cwd
   end
 
-  local cp = checkpoint.load(repo_root)
-  local model = Model.new(git, repo_root, cp)
-  local store = comments_store.new()
-
   local self = setmetatable({}, { __index = M })
   self.repo_root = repo_root
-  self.model = model
-  self.comments = store
+  self.model = Model.new(git, repo_root, checkpoint.load(repo_root))
+  self.comments = comments_store.new()
   self.current_path = nil
   self.augroup = nil
   self.closed = false
   self.fs = nil
   self.watching = false
   self._debounce = nil
-  self:_layout()
-  self:_keymaps()
+  self.model:refresh()
+  M.active = self
+
+  self.view = diffview.open({
+    repo_root = repo_root,
+    model = self.model,
+    head_sha = function() return git.head_sha(repo_root) end,
+    on_file_open = function(context) self:_on_file_open(context) end,
+    on_close = function() self:_deactivate() end,
+  })
+  self.tab = self.view.tabpage
+  self:_bind_panel()
   self:_watch()
   self:_start_watcher()
-  self:refresh()
-  M.active = self
+  self:_set_labels()
   return self
 end
 
--- Build the three-window layout: sidebar | original | modified.
-function M:_layout()
-  vim.cmd("tabnew")
-  self.tab = vim.api.nvim_get_current_tabpage()
-
-  self.sidebar_win = vim.api.nvim_get_current_win()
-  self.sidebar_buf = self:_scratch("review-loop-sidebar", true)
-  vim.api.nvim_win_set_buf(self.sidebar_win, self.sidebar_buf)
-  vim.wo[self.sidebar_win].cursorline = true
-  vim.wo[self.sidebar_win].wrap = false
-
-  vim.cmd("botright vnew")
-  self.original_win = vim.api.nvim_get_current_win()
-  self.original_buf = self:_scratch("review-loop-original")
-  vim.api.nvim_win_set_buf(self.original_win, self.original_buf)
-
-  vim.cmd("botright vnew")
-  self.modified_win = vim.api.nvim_get_current_win()
-  self.modified_buf = self:_scratch("review-loop-modified")
-  vim.api.nvim_win_set_buf(self.modified_win, self.modified_buf)
-
-  vim.api.nvim_set_current_win(self.sidebar_win)
-  self:_apply_widths()
+local function map(buf, mode, lhs, fn, desc)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.keymap.set(mode, lhs, fn, { buffer = buf, silent = true, nowait = true, desc = desc })
 end
 
--- Proportional widths: sidebar (nav) 16%, original 42%, modified fills ~42%.
--- Re-applied after every refresh and on VimResized so diff rendering never
--- clobbers the layout.
-function M:_apply_widths()
-  if not self.original_win or not vim.api.nvim_win_is_valid(self.original_win) then
-    return
-  end
-  local cols = vim.o.columns
-  pcall(vim.api.nvim_win_set_width, self.sidebar_win, math.floor(0.16 * cols))
-  pcall(vim.api.nvim_win_set_width, self.original_win, math.floor(0.42 * cols))
-end
-
-function M:_scratch(name, listed)
-  local buf = vim.api.nvim_create_buf(listed == true, false)
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].bufhidden = "hide"
-  return buf
-end
-
-function M:_keymaps()
+function M:_bind_panel()
+  local buf = self.view and self.view.panel and self.view.panel.bufid
   local km = config.get().keymaps
-  local function map(buf, lhs, fn, desc)
-    vim.keymap.set("n", lhs, fn, { buffer = buf, silent = true, desc = desc })
-  end
-  local function vmap(buf, lhs, fn, desc)
-    vim.keymap.set("v", lhs, fn, { buffer = buf, silent = true, desc = desc })
-  end
+  map(buf, "n", km.add_file_note, function() self:_note_under_cursor() end, "Add file note")
+  map(buf, "n", km.refresh, function() self:refresh() end, "Refresh review")
+  map(buf, "n", km.submit, function() self:submit() end, "Submit review")
+  map(buf, "n", km.toggle_mode, function() self:toggle_mode() end, "Toggle review mode")
+  map(buf, "n", km.close, function() self:close() end, "Close review")
+end
 
-  local sb = self.sidebar_buf
-  map(sb, km.open_file, function() self:_open_under_cursor() end, "Open file under cursor")
-  map(sb, km.add_file_note, function() self:_note_under_cursor() end, "Add file note")
-  map(sb, km.refresh, function() self:refresh() end, "Refresh")
-  map(sb, km.submit, function() self:submit() end, "Submit review")
-  map(sb, km.toggle_mode, function() self:toggle_mode() end, "Toggle diff mode")
-  map(sb, km.close, function() self:close() end, "Close")
+function M:_on_file_open(context)
+  self.current_path = context.path
+  self.original_buf = context.original_buf
+  self.modified_buf = context.modified_buf
+  self.original_win = context.original_win
+  self.modified_win = context.modified_win
+  self.original_nulled = context.original_nulled
+  self.modified_nulled = context.modified_nulled
 
-  for _, buf in ipairs({ self.original_buf, self.modified_buf }) do
-    map(buf, km.add_comment, function() self:_comment_under_cursor() end, "Add/edit comment")
-    vmap(buf, km.add_comment, function() self:_comment_on_selection() end, "Comment selected lines")
-    map(buf, km.delete_comment, function() self:_delete_under_cursor() end, "Delete comment")
-    map(buf, km.next_comment, function() self:next_comment() end, "Next comment")
-    map(buf, km.prev_comment, function() self:prev_comment() end, "Previous comment")
-    map(buf, km.refresh, function() self:refresh() end, "Refresh")
-    map(buf, km.submit, function() self:submit() end, "Submit review")
-    map(buf, km.toggle_mode, function() self:toggle_mode() end, "Toggle diff mode")
+  local km = config.get().keymaps
+  for _, target in ipairs({
+    { buf = self.original_buf, nulled = context.original_nulled },
+    { buf = self.modified_buf, nulled = context.modified_nulled },
+  }) do
+    if not target.nulled then
+      map(target.buf, "n", km.add_comment, function() self:_comment_under_cursor() end, "Add/edit comment")
+      map(target.buf, "v", km.add_comment, function() self:_comment_on_selection() end, "Comment selected lines")
+      map(target.buf, "n", km.delete_comment, function() self:_delete_under_cursor() end, "Delete comment")
+      map(target.buf, "n", km.next_comment, function() self:next_comment() end, "Next comment")
+      map(target.buf, "n", km.prev_comment, function() self:prev_comment() end, "Previous comment")
+      map(target.buf, "n", km.refresh, function() self:refresh() end, "Refresh review")
+      map(target.buf, "n", km.submit, function() self:submit() end, "Submit review")
+      map(target.buf, "n", km.toggle_mode, function() self:toggle_mode() end, "Toggle review mode")
+    end
   end
+  self:_apply_extmarks()
+  self:_set_labels()
 end
 
 -- BufWritePost autocmd: catches nvim's own writes instantly.
@@ -137,14 +108,6 @@ function M:_watch()
           self:refresh()
         end
       end)
-    end,
-  })
-  vim.api.nvim_create_autocmd("VimResized", {
-    group = self.augroup,
-    callback = function()
-      if not self.closed then
-        self:_apply_widths()
-      end
     end,
   })
 end
@@ -208,101 +171,47 @@ function M:toggle_watch()
   vim.notify("Review-loop watcher " .. (self.watching and "on" or "off"), vim.log.levels.INFO)
 end
 
--- refresh() re-scans, re-renders the sidebar, reloads the current file, labels.
+-- Re-scan review-loop's model, then let Diffview reconcile its file entries.
 function M:refresh()
+  -- Diffview uses real LOCAL buffers on the right; reload agent writes before
+  -- reconciling entries so an open file never shows stale content.
+  pcall(vim.cmd, "checktime")
   local state = self.model:refresh()
-  sidebar.render(self.sidebar_buf, state, self.comments)
-
-  if self.current_path == nil and #state.recentPaths > 0 then
-    self.current_path = state.recentPaths[1]
+  if self.view and not self.closed then
+    diffview.refresh(self.view, self.model, git.head_sha(self.repo_root))
   end
-
-  if self.current_path ~= nil then
-    local file = self:_file_or_nil(self.current_path)
-    if file then
-      diffview.show(self:_diff_ctx(), file)
-    else
-      self.current_path = nil
-      self:_clear_diff()
-    end
-  else
-    self:_clear_diff()
-  end
-  self:_apply_extmarks()
   self:_set_labels()
-  self:_apply_widths()
+  return state
 end
 
--- winbar labels: which pane is the baseline vs current, plus mode/watch state.
 function M:_set_labels()
   local mode = self.model:current_mode()
   local left = mode == "checkpoint" and "Reviewed (since review)" or "Reviewed (HEAD)"
   local watch = self.watching and " *watching" or ""
-  local m = mode == "checkpoint" and "since review" or "vs HEAD"
+  local mode_label = mode == "checkpoint" and "since review" or "vs HEAD"
   pcall(function()
-    vim.wo[self.sidebar_win].winbar = ("%s  [%s]%s"):format(self.model:state().repoName, m, watch)
-    vim.wo[self.original_win].winbar = left
-    vim.wo[self.modified_win].winbar = "Current"
+    local panel = self.view and self.view.panel
+    if panel and panel.winid and vim.api.nvim_win_is_valid(panel.winid) then
+      vim.wo[panel.winid].winbar = ("%s  [%s]%s"):format(self.model:state().repoName, mode_label, watch)
+    end
+    if self.original_win and vim.api.nvim_win_is_valid(self.original_win) then
+      vim.wo[self.original_win].winbar = left
+    end
+    if self.modified_win and vim.api.nvim_win_is_valid(self.modified_win) then
+      vim.wo[self.modified_win].winbar = "Current"
+    end
   end)
 end
 
-function M:_diff_ctx()
-  return {
-    original_win = self.original_win,
-    modified_win = self.modified_win,
-    original_buf = self.original_buf,
-    modified_buf = self.modified_buf,
-  }
-end
-
-function M:_file_or_nil(path)
-  local state = self.model:state()
-  for _, f in ipairs(state.files) do
-    if f.path == path then
-      local ok, file = pcall(self.model.get_file, self.model, path, self.model:current_mode())
-      if ok then
-        return file
-      end
-    end
-  end
-  return nil
-end
-
-function M:_clear_diff()
-  for _, buf in ipairs({ self.original_buf, self.modified_buf }) do
-    vim.bo[buf].modifiable = true
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
-    vim.bo[buf].modifiable = false
-  end
-  vim.api.nvim_buf_clear_namespace(self.original_buf, NS, 0, -1)
-  vim.api.nvim_buf_clear_namespace(self.modified_buf, NS, 0, -1)
-end
-
-function M:_open_under_cursor()
-  local path = sidebar.line_to_path[vim.api.nvim_win_get_cursor(self.sidebar_win)[1]]
-  if path == nil then
-    return
-  end
-  if self.current_path ~= nil then
-    diffview.remember(self:_diff_ctx(), self.current_path, self.model:current_mode())
-  end
-  self.current_path = path
-  local file = self:_file_or_nil(path)
-  if file then
-    diffview.show(self:_diff_ctx(), file)
-    self:_apply_extmarks()
-    self:_set_labels()
-  end
-end
-
 function M:_note_under_cursor()
-  local path = sidebar.line_to_path[vim.api.nvim_win_get_cursor(self.sidebar_win)[1]]
-  if path == nil then
-    return
-  end
+  local panel = self.view and self.view.panel
+  local entry = panel and panel:get_item_at_cursor()
+  local path = entry and entry.layout and entry.path or nil
+  if path == nil then return end
+
   self:_edit("File note: " .. path, self:_existing_body(path, "file", nil), function(body)
-    self:_upsert(path, "file", nil, body)
-    self:refresh()
+    self:_upsert(path, "file", nil, nil, body)
+    self:_apply_extmarks()
   end)
 end
 
@@ -342,7 +251,6 @@ function M:_open_comment(side, line_start, line_end)
     self:_existing_body(self.current_path, side, line_start, le), function(body)
       self:_upsert(self.current_path, side, line_start, le, body)
       self:_apply_extmarks()
-      sidebar.render(self.sidebar_buf, self.model:state(), self.comments)
       -- After the popup closes, return to the line we just commented on.
       -- Counters the diff pane jumping away (e.g. to the bottom) on close.
       vim.schedule(function()
@@ -370,7 +278,6 @@ function M:_delete_under_cursor()
     if c.side == side and line >= lo and line <= hi then
       comments_store.remove(self.comments, c.id)
       self:_apply_extmarks()
-      sidebar.render(self.sidebar_buf, self.model:state(), self.comments)
       return
     end
   end
@@ -388,6 +295,7 @@ end
 -- _upsert edits an existing same-location comment, or adds one. A blank body
 -- removes the comment at that location (matches the editor's discard intent).
 function M:_upsert(path, side, line, line_end, body)
+  body = body or ""
   local has_text = body:match("%S") ~= nil
   for _, c in ipairs(comments_store.for_path(self.comments, path)) do
     if c.side == side and c.line == line and (c.line_end or line) == (line_end or line) then
@@ -409,11 +317,14 @@ end
 
 -- _apply_extmarks draws a "+" glyph on commented lines and a file-note banner.
 function M:_apply_extmarks()
-  vim.api.nvim_buf_clear_namespace(self.original_buf, NS, 0, -1)
-  vim.api.nvim_buf_clear_namespace(self.modified_buf, NS, 0, -1)
-  if self.current_path == nil then
-    return
+  local function clear(buf, nulled)
+    if buf and not nulled and vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
+    end
   end
+  clear(self.original_buf, self.original_nulled)
+  clear(self.modified_buf, self.modified_nulled)
+  if self.current_path == nil then return end
   for _, c in ipairs(comments_store.for_path(self.comments, self.current_path)) do
     if c.body:match("%S") then
       local label = c.body
@@ -422,13 +333,17 @@ function M:_apply_extmarks()
       end
       local opts = { sign_text = "+", priority = 20, virt_text = { { label, "Comment" } } }
       if c.side == "file" then
-        vim.api.nvim_buf_set_extmark(self.modified_buf, NS, 0, 0, opts)
+        local buf = self.modified_nulled and self.original_buf or self.modified_buf
+        pcall(vim.api.nvim_buf_set_extmark, buf, NS, 0, 0, opts)
       elseif c.line then
         local buf = c.side == "original" and self.original_buf or self.modified_buf
+        local nulled = c.side == "original" and self.original_nulled or self.modified_nulled
         if c.line_end and c.line_end > (c.line or 0) then
           opts.end_row = math.max(0, c.line_end - 1)
         end
-        pcall(vim.api.nvim_buf_set_extmark, buf, NS, math.max(0, c.line - 1), 0, opts)
+        if not nulled then
+          pcall(vim.api.nvim_buf_set_extmark, buf, NS, math.max(0, c.line - 1), 0, opts)
+        end
       end
     end
   end
@@ -580,18 +495,22 @@ function M:_feedback_path()
   return vim.fn.stdpath("data") .. "/review-loop/feedback.md"
 end
 
-function M:close()
+function M:_deactivate()
   self.closed = true
   self:_stop_watcher()
   if self.augroup then
     pcall(vim.api.nvim_del_augroup_by_id, self.augroup)
+    self.augroup = nil
   end
-  if self.tab and vim.api.nvim_tabpage_is_valid(self.tab) then
-    pcall(vim.cmd, "tabclose " .. vim.api.nvim_tabpage_get_number(self.tab))
-  end
-  if M.active == self then
-    M.active = nil
-  end
+  if M.active == self then M.active = nil end
+end
+
+function M:close()
+  if self.closed then return end
+  local view = self.view
+  self:_deactivate()
+  self.view = nil
+  diffview.close(view)
 end
 
 -- _edit opens a floating editor. on_save(body) runs when the window closes

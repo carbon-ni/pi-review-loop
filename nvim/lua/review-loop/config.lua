@@ -2,8 +2,6 @@
 local M = {}
 
 M.defaults = {
-  -- Sidebar width in columns.
-  width = 34,
   -- Re-scan on BufWritePost (nvim saves) and via the repo file watcher.
   auto_refresh = true,
 
@@ -13,9 +11,8 @@ M.defaults = {
   feedback_file = nil,
 
   keymaps = {
-    open_file = "<CR>",
     add_comment = "c",
-    add_file_note = "n",
+    add_file_note = "<leader>rn",
     delete_comment = "x",
     next_comment = "]r",
     prev_comment = "[r",
