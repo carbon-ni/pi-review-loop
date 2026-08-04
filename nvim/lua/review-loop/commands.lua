@@ -33,7 +33,7 @@ function M.setup()
     ReviewLoopYank = { fn = function(c) c:yank_feedback() end, desc = "Yank composed feedback to the + register" },
     ReviewLoopSend = {
       fn = function(c) c:send_feedback() end,
-      desc = "Write composed feedback to the feedback file (no checkpoint)",
+      desc = "Submit review and copy its feedback file path to the + register",
     },
     ReviewLoopClose = { fn = function(c) c:close() end, desc = "Close the reviewer" },
     ReviewLoopNextComment = { fn = function(c) c:next_comment() end, desc = "Jump to next comment" },

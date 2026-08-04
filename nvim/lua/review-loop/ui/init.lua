@@ -495,7 +495,7 @@ function M:toggle_mode()
   self:refresh()
 end
 
--- submit() checkpoints the workspace, then delivers the composed feedback.
+-- submit() checkpoints the workspace, delivers feedback, and returns its path.
 function M:submit()
   local composed = feedback.compose(comments_store.to_review_comments(self.comments))
   local reviewed_paths = self.model:checkpoint_changed_paths()
@@ -508,7 +508,7 @@ function M:submit()
   self.model:set_checkpoint(cp)
   self.comments = comments_store.new()
   self:refresh()
-  self:deliver(composed)
+  return self:deliver(composed)
 end
 
 -- Composed feedback from the live comment set (no checkpoint).
@@ -540,18 +540,23 @@ function M:open_feedback()
   vim.notify(fb == "" and "No comments yet." or "Feedback preview (q to close).", vim.log.levels.INFO)
 end
 
--- send_feedback() writes the current feedback file WITHOUT checkpointing.
+-- send_feedback() submits the review and copies the delivered file path to the
+-- system clipboard.
 function M:send_feedback()
-  local fb = self:_composed()
-  if fb == "" then
+  if self:_composed() == "" then
     vim.notify("No comments to send.", vim.log.levels.WARN)
     return
   end
-  self:deliver(fb)
+  local path = self:submit()
+  if not path then
+    return
+  end
+  vim.fn.setreg("+", path)
+  vim.notify("Feedback path copied to + register.", vim.log.levels.INFO)
 end
 
--- deliver(fb) writes composed feedback to the feedback file and notifies the path.
--- Paste the file's path to the agent, or tell the agent to read it.
+-- deliver(fb) writes composed feedback to the feedback file, notifies the path,
+-- and returns it.
 function M:deliver(fb)
   if fb == "" then
     vim.notify("Review checkpoint saved (no comments).", vim.log.levels.INFO)
@@ -563,6 +568,7 @@ function M:deliver(fb)
   f:write(fb)
   f:close()
   vim.notify("Feedback written to " .. path, vim.log.levels.INFO)
+  return path
 end
 
 -- _feedback_path() -> configured path, else a stable path outside the worktree.

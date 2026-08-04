@@ -198,7 +198,7 @@ Everything is also a command (scriptable / mappable) in addition to the keys:
 | `:ReviewLoopMode` | toggle `checkpoint` ↔ `head` (same as `<leader>rm`) |
 | `:ReviewLoopFeedback` | preview composed feedback in a split |
 | `:ReviewLoopYank` | yank composed feedback to `+` |
-| `:ReviewLoopSend` | write composed feedback to the feedback file **without** checkpointing |
+| `:ReviewLoopSend` | submit, checkpoint, and copy feedback file path to `+` |
 | `:ReviewLoopClose` | close the reviewer |
 
 Map any of them, e.g. `vim.keymap.set("n", "<leader>ds", "<cmd>ReviewLoopSend<cr>")`.
@@ -209,8 +209,8 @@ Map any of them, e.g. `vim.keymap.set("n", "<leader>ds", "<cmd>ReviewLoopSend<cr
 
 The TypeScript extension calls `ctx.ui.pasteToEditor(feedback)` because it runs
 *inside* pi. This plugin is a separate process, so on submit it writes the
-composed feedback to a file and shows the path — no clipboard or tmux plumbing.
-You then forward it however you like:
+composed feedback to a file and shows the path. `:ReviewLoopSend` also copies
+that file path to the `+` register. You then forward it however you like:
 
 - paste the file's contents into pi, or
 - tell the agent to read the path (e.g. `read <path>`).
@@ -223,9 +223,9 @@ feedback_file = "/tmp/review-loop.md",       -- any absolute path
 -- feedback_file = "./.review-feedback.md",  -- repo-local (gitignore it)
 ```
 
-`:ReviewLoopSend` writes the same file from the current comments **without**
-checkpointing (a mid-review preview). `:ReviewLoopYank` still yanks to the `+`
-register if you prefer the clipboard.
+`:ReviewLoopSend` submits the current comments, checkpoints the workspace, and
+yanks the feedback file path to the `+` register. `:ReviewLoopYank` instead
+yanks composed feedback itself without submitting.
 
 ---
 
@@ -242,7 +242,7 @@ implementations read each other's checkpoints.
 
 ```sh
 cd nvim
-./scripts/test     # plenary unit suite (37 tests): feedback, checkpoint, git, state, comments
+./scripts/test     # plenary unit suite (43 tests): feedback, checkpoint, git, state, comments, UI
 ./scripts/lint     # luacheck over lua/ and tests/
 ./scripts/smoke    # headless end-to-end: open → comment → submit → checkpoint
 ```

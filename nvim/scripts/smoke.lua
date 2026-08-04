@@ -36,10 +36,12 @@ ctrl:_upsert("a.txt", "modified", 2, nil, "new line needs a test")
 ctrl:_upsert("a.txt", "modified", 1, 2, "watch the range")
 ctrl:_apply_extmarks()
 
--- Submit and verify persistence.
-ctrl:submit()
--- Submit must write the composed feedback to the feedback file (no tmux/clipboard).
+-- Send and verify checkpoint persistence, feedback delivery, and copied path.
+ctrl:send_feedback()
 local fb_path = ctrl:_feedback_path()
+if vim.fn.getreg("+") ~= fb_path then fail("send did not copy feedback path to + register") end
+-- Send must write the composed feedback to the feedback file.
+
 local f = io.open(fb_path, "r")
 if f == nil then fail("feedback file not written: " .. fb_path) end
 local written = f:read("*a"); f:close()
