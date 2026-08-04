@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Headless end-to-end smoke test: temp repo -> open -> comment -> submit -> checkpoint.
+set -euo pipefail
+cd "$(dirname "$0")/.."   # -> nvim/
+
+export REVIEW_LOOP_ROOT="$PWD"
+exec nvim --headless -u NONE \
+  +"set rtp+=$PWD" \
+  -c "luafile scripts/smoke.lua" +qa
