@@ -55,8 +55,6 @@ function M:_layout()
   self.tab = vim.api.nvim_get_current_tabpage()
 
   self.sidebar_win = vim.api.nvim_get_current_win()
-  local width = config.get().width
-  vim.api.nvim_win_set_width(self.sidebar_win, width)
   self.sidebar_buf = self:_scratch("review-loop-sidebar", true)
   vim.api.nvim_win_set_buf(self.sidebar_win, self.sidebar_buf)
   vim.wo[self.sidebar_win].cursorline = true
@@ -72,10 +70,20 @@ function M:_layout()
   self.modified_buf = self:_scratch("review-loop-modified")
   vim.api.nvim_win_set_buf(self.modified_win, self.modified_buf)
 
-  local diff_w = math.floor((vim.o.columns - width) / 2)
-  pcall(vim.api.nvim_win_set_width, self.original_win, diff_w)
-
   vim.api.nvim_set_current_win(self.sidebar_win)
+  self:_apply_widths()
+end
+
+-- Proportional widths: sidebar 20%, original 40%, modified fills ~40%.
+-- Re-applied after every refresh and on VimResized so diff rendering never
+-- clobbers the layout.
+function M:_apply_widths()
+  if not self.original_win or not vim.api.nvim_win_is_valid(self.original_win) then
+    return
+  end
+  local cols = vim.o.columns
+  pcall(vim.api.nvim_win_set_width, self.sidebar_win, math.floor(0.2 * cols))
+  pcall(vim.api.nvim_win_set_width, self.original_win, math.floor(0.4 * cols))
 end
 
 function M:_scratch(name, listed)
@@ -123,6 +131,14 @@ function M:_watch()
           self:refresh()
         end
       end)
+    end,
+  })
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = self.augroup,
+    callback = function()
+      if not self.closed then
+        self:_apply_widths()
+      end
     end,
   })
 end
@@ -208,6 +224,7 @@ function M:refresh()
   end
   self:_apply_extmarks()
   self:_set_labels()
+  self:_apply_widths()
 end
 
 -- winbar labels: which pane is the baseline vs current, plus mode/watch state.

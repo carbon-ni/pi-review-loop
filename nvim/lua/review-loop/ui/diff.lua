@@ -47,6 +47,10 @@ function M.show(ctx, file)
 
   restore_view(ctx.original_win, file.path, file.mode)
   restore_view(ctx.modified_win, file.path, file.mode)
+
+  -- Synchronized scrolling: moving one pane scrolls the other.
+  vim.wo[ctx.original_win].scrollbind = true
+  vim.wo[ctx.modified_win].scrollbind = true
 end
 
 -- remember(ctx, path, mode) snapshots scroll before switching files.
