@@ -35,7 +35,7 @@
     "@earendil-works/pi-coding-agent": "*",
     "@types/node": "^24.5.2",
     "esbuild": "^0.28.1",
-    "monaco-editor": "^0.56.0",
+    "monaco-editor": "^0.53.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2"
   },
