@@ -13,6 +13,8 @@ local diffview = require("review-loop.ui.diff")
 local M = {}
 local NS = vim.api.nvim_create_namespace("review-loop")
 local AU_GROUP = "ReviewLoopRefresh"
+-- How often the HEAD poll checks for a new commit / branch switch (ms).
+local HEAD_POLL_MS = 3000
 
 M.active = nil
 
@@ -31,10 +33,12 @@ function M.open()
   self.augroup = nil
   self.closed = false
   self.fs = nil
+  self._head_timer = nil
   self.watching = false
   self._debounce = nil
   self.model:refresh()
   M.active = self
+  self._lastHead = self.model.initialHead
 
   self.view = diffview.open({
     repo_root = repo_root,
@@ -156,13 +160,57 @@ function M:_start_watcher()
     return
   end
   self.fs = fs
+  self:_start_head_poll()
   self.watching = true
+end
+
+-- HEAD poll: the file watcher ignores .git and (on Linux) is not recursive into
+-- .git, so a new commit or branch switch would otherwise leave head-mode stale.
+-- Polling HEAD and refreshing on change makes "vs HEAD" reliably live on every
+-- platform instead of relying on a .git watcher event leaking through.
+function M:_start_head_poll()
+  if self._head_timer then
+    return
+  end
+  local uv = vim.uv or vim.loop
+  local timer = uv.new_timer()
+  if not timer then
+    return
+  end
+  timer:start(HEAD_POLL_MS, HEAD_POLL_MS, function()
+    vim.schedule(function()
+      if not self.closed then
+        self:_poll_head()
+      end
+    end)
+  end)
+  self._head_timer = timer
+end
+
+-- _poll_head refreshes when HEAD has moved since the last check. Reads through
+-- the model's injected git so the detection is unit-testable with a fake.
+function M:_poll_head()
+  local cur = self.model.git.head_sha(self.repo_root)
+  if cur == nil or cur == self._lastHead then
+    return
+  end
+  self._lastHead = cur
+  -- Only head mode is baseline-affected by a new commit; checkpoint mode's
+  -- baseline is fixed, so a commit must not perturb it.
+  if self.model:current_mode() == "head" then
+    self:refresh()
+  end
 end
 
 function M:_stop_watcher()
   if self.fs then
     pcall(function() self.fs:stop() end)
     self.fs = nil
+  end
+  if self._head_timer then
+    pcall(function() self._head_timer:stop() end)
+    pcall(function() self._head_timer:close() end)
+    self._head_timer = nil
   end
   self.watching = false
 end
@@ -187,6 +235,11 @@ function M:refresh()
     diffview.refresh(self.view, self.model, git.head_sha(self.repo_root))
   end
   self:_set_labels()
+  -- Keep the HEAD poll baseline in sync so a watcher-triggered refresh (the
+  -- macOS .git leak) does not cause a redundant poll refresh right after.
+  if self.model and self.model.git then
+    self._lastHead = self.model.git.head_sha(self.repo_root)
+  end
   return state
 end
 

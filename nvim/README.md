@@ -18,7 +18,9 @@ written in Neovim is readable by pi (and vice versa).
 - **Inline comments** as `+` sign glyphs with the comment as virtual text
 - **Live refresh** — a recursive repo watcher picks up the agent's writes; a
   `BufWritePost` autocmd catches your own saves (recursive on macOS; top-level
-  only on Linux)
+  only on Linux). A HEAD poll additionally refreshes `head` mode when a new
+  commit or branch switch moves `HEAD` (the file watcher ignores `.git`, so this
+  is what keeps "vs HEAD" live, especially on Linux)
 - **Two modes**: `checkpoint` (since last review) and `head` (vs current `HEAD`)
 - **Submit** composes feedback (byte-identical to the extension), checkpoints the
   workspace, and **writes the feedback to a file** whose path is shown
