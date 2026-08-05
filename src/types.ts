@@ -79,11 +79,12 @@ export type WindowMessage =
   | { type: "set-mode"; mode: ReviewMode }
   | { type: "request-file"; path: string; mode: ReviewMode; requestId: string }
   | { type: "submit-review"; comments: ReviewComment[] }
-  | { type: "persist-comments"; comments: ReviewComment[] };
+  | { type: "persist-comments"; comments: ReviewComment[] }
+  | { type: "mark-viewed"; path: string; viewed: boolean };
 
 export type HostMessage =
   | { type: "workspace"; state: WorkspaceState }
   | { type: "file"; requestId: string; file: FileContents }
   | { type: "file-error"; requestId: string; message: string }
   | { type: "review-submitted"; checkpointAt: number; insertedFeedback: boolean }
-  | { type: "session-restore"; comments: ReviewComment[]; activePath: string | null; mode: ReviewMode };
+  | { type: "session-restore"; comments: ReviewComment[]; viewedPaths: string[]; activePath: string | null; mode: ReviewMode };

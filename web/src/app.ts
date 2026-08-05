@@ -87,6 +87,7 @@ interface ScrollPosition {
 }
 
 let comments: UiComment[] = [];
+let viewedPaths = new Set<string>();
 let draft: Omit<UiComment, "body" | "id"> | null = null;
 let activeViewZones: ActiveViewZone[] = [];
 let pendingOpenPath: string | null = null;
@@ -263,6 +264,18 @@ function isPendingReview(path: string): boolean {
   return workspace?.pendingFiles.some((file) => file.path === path) ?? false;
 }
 
+function toggleViewed(path: string): void {
+  if (viewedPaths.has(path)) {
+    viewedPaths.delete(path);
+    send({ type: "mark-viewed", path, viewed: false });
+  } else {
+    viewedPaths.add(path);
+    send({ type: "mark-viewed", path, viewed: true });
+  }
+  renderRecent();
+  renderTree();
+}
+
 function commentCount(path: string): number {
   return comments.filter((comment) => comment.path === path).length;
 }
@@ -295,6 +308,14 @@ function makeRecentRow(file: ChangedFile): HTMLButtonElement {
   button.append(copy);
   const badge = commentBadge(file.path);
   if (badge) button.append(badge);
+
+  const viewed = document.createElement("span");
+  viewed.className = "reviewed-check";
+  viewed.textContent = viewedPaths.has(file.path) ? "✓" : "";
+  viewed.title = viewedPaths.has(file.path) ? "Marked as reviewed (click to unmark)" : "Mark as reviewed";
+  viewed.addEventListener("click", (e) => { e.stopPropagation(); toggleViewed(file.path); });
+  button.append(viewed);
+
   if (workspace?.mode === "head" && !isPendingReview(file.path)) {
     const reviewed = document.createElement("span");
     reviewed.className = "reviewed-check";
@@ -918,6 +939,7 @@ window.__reviewReceive = (message: HostMessage): void => {
   }
   if (message.type === "session-restore") {
     comments = message.comments.map((c) => ({ ...c, id: c.id ?? makeCommentId() }));
+    viewedPaths = new Set(message.viewedPaths);
     renderRecent();
     renderTree();
     updateSubmitButton();

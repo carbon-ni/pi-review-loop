@@ -172,7 +172,7 @@ export class ReviewController {
     if (message.type === "ready") {
       this.send({ type: "workspace", state: this.model.state() });
       if (this.session) {
-        this.send({ type: "session-restore", comments: this.session.comments, activePath: this.session.activePath, mode: this.session.mode });
+        this.send({ type: "session-restore", comments: this.session.comments, viewedPaths: this.session.viewedPaths, activePath: this.session.activePath, mode: this.session.mode });
       }
       return;
     }
@@ -195,6 +195,18 @@ export class ReviewController {
 
     if (message.type === "persist-comments") {
       if (this.session) { this.session.comments = message.comments; void this.store?.saveSession(this.session); }
+      return;
+    }
+
+    if (message.type === "mark-viewed") {
+      if (this.session) {
+        if (message.viewed) {
+          this.session.viewedPaths = [...new Set([...this.session.viewedPaths, message.path])];
+        } else {
+          this.session.viewedPaths = this.session.viewedPaths.filter((p) => p !== message.path);
+        }
+        void this.store?.saveSession(this.session);
+      }
       return;
     }
 
