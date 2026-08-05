@@ -5,7 +5,7 @@ import { open, type GlimpseWindow } from "glimpseui";
 import { createCheckpoint, getRepoRoot } from "./git.js";
 import { composeFeedback } from "./prompt.js";
 import { ReviewStore } from "./store.js";
-import type { HostMessage, ReviewCheckpoint, WindowMessage } from "./types.js";
+import type { HostMessage, ReviewCheckpoint, ReviewSession, WindowMessage } from "./types.js";
 import { loadReviewHtml } from "./ui.js";
 import { WorkspaceModel } from "./workspace.js";
 
@@ -50,11 +50,27 @@ function parseMessage(value: unknown): WindowMessage | null {
   return value as WindowMessage;
 }
 
+function freshSession(repoRoot: string, checkpointId: string | null | undefined): ReviewSession {
+  const now = Date.now();
+  return {
+    version: 1,
+    repoRoot,
+    checkpointId: checkpointId ?? null,
+    mode: "checkpoint",
+    comments: [],
+    viewedPaths: [],
+    activePath: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export class ReviewController {
   private window: GlimpseWindow | null = null;
   private watcher: FSWatcher | null = null;
   private model: WorkspaceModel | null = null;
   private store: ReviewStore | null = null;
+  private session: ReviewSession | null = null;
   private repoRoot = "";
   private refreshTimer: NodeJS.Timeout | null = null;
   private operation = Promise.resolve();
@@ -80,6 +96,7 @@ export class ReviewController {
     this.store = new ReviewStore(this.repoRoot);
     const stored = await this.store.load();
     const checkpoint = stored.checkpoint ?? latestCheckpoint(ctx, this.repoRoot);
+    this.session = stored.session ?? freshSession(this.repoRoot, checkpoint?.id);
     this.model = await WorkspaceModel.create(this.pi, this.repoRoot, checkpoint);
     await this.model.refresh();
     await this.startWatcher(ctx);
@@ -105,6 +122,7 @@ export class ReviewController {
     await this.watcher?.close();
     this.watcher = null;
     this.store = null;
+    this.session = null;
     const window = this.window;
     this.window = null;
     try { window?.close(); } catch {}
@@ -158,6 +176,7 @@ export class ReviewController {
 
     if (message.type === "set-mode") {
       this.model.setMode(message.mode);
+      if (this.session) { this.session.mode = message.mode; void this.store?.saveSession(this.session); }
       this.send({ type: "workspace", state: this.model.state() });
       return;
     }
@@ -178,6 +197,7 @@ export class ReviewController {
         const reviewedPaths = this.model.checkpointChangedPaths();
         const checkpoint = await createCheckpoint(this.pi, this.repoRoot, reviewedPaths, feedback);
         await this.store?.saveCheckpoint(checkpoint);
+        if (this.session) { this.session.checkpointId = checkpoint.id; this.session.comments = []; void this.store?.saveSession(this.session); }
         this.pi.appendEntry<ReviewCheckpoint>(CHECKPOINT_ENTRY, checkpoint);
         this.model.setCheckpoint(checkpoint);
         const state = await this.model.refresh();
@@ -207,6 +227,7 @@ export class ReviewController {
     void this.watcher?.close();
     this.watcher = null;
     this.store = null;
+    this.session = null;
     this.onClosed();
   }
 }
