@@ -246,6 +246,16 @@ function M:_comment_on_selection()
   if s > e then
     s, e = e, s
   end
+  -- Stale-mark guard: '< / '> are committed only AFTER visual mode exits. If
+  -- either still reads 0 the selection range is unknown. Storing line 0 would
+  -- clamp the extmark to line 1 (invisible at the selection, undeletable there)
+  -- so fall back to the cursor line, which sits inside the intended selection
+  -- once visual mode has exited.
+  if s == 0 or e == 0 then
+    log.debug("selection.stale_marks", { mark_lo = raw_lo, mark_hi = raw_hi })
+    local cur = vim.api.nvim_win_get_cursor(win)[1]
+    s, e = cur, cur
+  end
   log.debug("selection.read", {
     path = self.current_path, side = side, mode = vim.fn.mode(), win = win,
     mark_lo = raw_lo, mark_hi = raw_hi, s = s, e = e,
@@ -360,7 +370,8 @@ function M:_apply_extmarks()
       if c.side == "file" then
         local buf = self.modified_nulled and self.original_buf or self.modified_buf
         pcall(vim.api.nvim_buf_set_extmark, buf, NS, 0, 0, opts)
-      elseif c.line then
+      elseif c.line and c.line > 0 then
+        -- line <= 0 is never a valid target; skip rather than clamp onto line 1.
         local buf = c.side == "original" and self.original_buf or self.modified_buf
         local nulled = c.side == "original" and self.original_nulled or self.modified_nulled
         if c.line_end and c.line_end > (c.line or 0) then
