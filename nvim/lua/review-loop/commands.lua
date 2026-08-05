@@ -25,6 +25,17 @@ function M.setup()
     require("review-loop").open()
   end, { desc = "Open the persistent incremental diff reviewer" })
 
+  -- :ReviewLoopDebug toggles structured logging on/off and reports the log path.
+  -- Unlike the per-session commands above, it works even when no reviewer is open.
+  vim.api.nvim_create_user_command("ReviewLoopDebug", function()
+    local log = require("review-loop.log")
+    local on = log.toggle()
+    vim.notify(
+      string.format("review-loop debug %s; log: %s", on and "ON" or "OFF", log.path()),
+      vim.log.levels.INFO
+    )
+  end, { desc = "Toggle review-loop debug logging and show the log path" })
+
   local cmds = {
     ReviewLoopRefresh = { fn = function(c) c:refresh() end, desc = "Re-scan the workspace now" },
     ReviewLoopWatch = { fn = function(c) c:toggle_watch() end, desc = "Toggle the repo file watcher" },

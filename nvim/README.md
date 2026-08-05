@@ -154,6 +154,11 @@ require("review-loop").setup({
   -- nil -> stdpath("data")/review-loop/feedback.md (outside the worktree).
   feedback_file = nil,
 
+  -- Structured debug log for observability, written to
+  -- stdpath("data")/review-loop/review-loop.log. Off by default;
+  -- toggle at runtime with :ReviewLoopDebug.
+  debug = false,
+
   keymaps = {
     add_comment    = "c",
     add_file_note  = "<leader>rn",
@@ -207,8 +212,48 @@ Everything is also a command (scriptable / mappable) in addition to the keys:
 | `:ReviewLoopYank` | yank composed feedback to `+` |
 | `:ReviewLoopSend` | submit, checkpoint, and copy feedback file path to `+` |
 | `:ReviewLoopClose` | close the reviewer |
+| `:ReviewLoopDebug` | toggle debug logging on/off and report the log path |
 
 Map any of them, e.g. `vim.keymap.set("n", "<leader>ds", "<cmd>ReviewLoopSend<cr>")`.
+
+---
+
+## Debug logging
+
+Structured observability logs are written to
+`stdpath("data")/review-loop/review-loop.log`. They are **off by default**; turn
+them on when reproducing an issue:
+
+```vim
+:ReviewLoopDebug        " toggles on/off and reports the log path
+```
+
+or permanently via config:
+
+```lua
+require("review-loop").setup({ debug = true })
+```
+
+Each line is `ISO_TIMESTAMP EVENT key=value ...`, e.g.:
+
+```
+2026-08-05T07:01:38 selection.read e=5 mark_hi=5 mark_lo=2 mode=n path=a.txt s=2 side=modified win=1004
+2026-08-05T07:01:38 comment.open line_end=5 line_start=2 path=a.txt side=modified target_line=2 target_win=1004
+2026-08-05T07:01:38 restore.set actual=2 target_line=2 target_win=1004
+```
+
+Key events for the comment/cursor flow:
+
+| Event | What it captures |
+| --- | --- |
+| `selection.read` | raw `'<`/`'>` marks + resolved `s`/`e` when commenting a visual range |
+| `comment.cursor` / `comment.open` | the line / range and restore target chosen |
+| `restore.set` | the restore target line vs the line the cursor **actually** landed on |
+| `restore.skip` | why a restore was skipped (reviewer closed, window invalid) |
+
+`actual` differing from `target_line` in `restore.set` is the smoking gun for a
+cursor-restore bug; `mark_lo`/`mark_hi` being stale in `selection.read` points
+at a visual-mark timing problem instead.
 
 ---
 

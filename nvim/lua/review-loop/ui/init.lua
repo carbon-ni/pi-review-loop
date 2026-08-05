@@ -6,6 +6,7 @@ local checkpoint = require("review-loop.checkpoint")
 local Model = require("review-loop.state").WorkspaceModel
 local feedback = require("review-loop.feedback")
 local config = require("review-loop.config")
+local log = require("review-loop.log")
 local comments_store = require("review-loop.ui.comments")
 local diffview = require("review-loop.ui.diff")
 
@@ -47,6 +48,11 @@ function M.open()
   self:_watch()
   self:_start_watcher()
   self:_set_labels()
+  log.debug("open", {
+    repo_root = repo_root,
+    has_checkpoint = self.model:current_checkpoint() ~= nil,
+    mode = self.model:current_mode(),
+  })
   return self
 end
 
@@ -222,6 +228,7 @@ function M:_comment_under_cursor()
   local win = vim.api.nvim_get_current_win()
   local side = win == self.original_win and "original" or "modified"
   local line = vim.api.nvim_win_get_cursor(win)[1]
+  log.debug("comment.cursor", { path = self.current_path, side = side, line = line, win = win })
   self:_open_comment(side, line, line)
 end
 
@@ -232,10 +239,17 @@ function M:_comment_on_selection()
   end
   local win = vim.api.nvim_get_current_win()
   local side = win == self.original_win and "original" or "modified"
-  local s, e = vim.fn.line("'<"), vim.fn.line("'>")
+  -- Capture the raw marks BEFORE swap; this is the crux of range-comment o11y;
+  -- if '< / '> are stale here the recorded range (and restore target) is wrong.
+  local raw_lo, raw_hi = vim.fn.line("'<"), vim.fn.line("'>")
+  local s, e = raw_lo, raw_hi
   if s > e then
     s, e = e, s
   end
+  log.debug("selection.read", {
+    path = self.current_path, side = side, mode = vim.fn.mode(), win = win,
+    mark_lo = raw_lo, mark_hi = raw_hi, s = s, e = e,
+  })
   self:_open_comment(side, s, e)
 end
 
@@ -247,6 +261,10 @@ function M:_open_comment(side, line_start, line_end)
   end
   local target_win = side == "original" and self.original_win or self.modified_win
   local target_line = line_start
+  log.debug("comment.open", {
+    path = self.current_path, side = side, line_start = line_start, line_end = le,
+    target_win = target_win, target_line = target_line,
+  })
   self:_edit(string.format("%s:%s (%s)", self.current_path, where, side),
     self:_existing_body(self.current_path, side, line_start, le), function(body)
       self:_upsert(self.current_path, side, line_start, le, body)
@@ -254,12 +272,19 @@ function M:_open_comment(side, line_start, line_end)
       -- After the popup closes, return to the line we just commented on.
       -- Counters the diff pane jumping away (e.g. to the bottom) on close.
       vim.schedule(function()
-        if self.closed or not (target_win and vim.api.nvim_win_is_valid(target_win)) then
+        local valid = target_win and vim.api.nvim_win_is_valid(target_win)
+        if self.closed or not valid then
+          log.debug("restore.skip", {
+            closed = self.closed, valid = valid,
+            target_win = target_win, target_line = target_line,
+          })
           return
         end
         pcall(vim.api.nvim_set_current_win, target_win)
         pcall(vim.api.nvim_win_set_cursor, target_win, { math.max(1, target_line), 0 })
         pcall(vim.api.nvim_win_call, target_win, function() vim.cmd("normal! zz") end)
+        local actual = vim.api.nvim_win_get_cursor(target_win)[1]
+        log.debug("restore.set", { target_win = target_win, target_line = target_line, actual = actual })
       end)
     end)
 end
@@ -416,6 +441,7 @@ function M:submit()
   local reviewed_paths = self.model:checkpoint_changed_paths()
   local ok, cp = pcall(git.create_checkpoint, self.repo_root, reviewed_paths, composed)
   if not ok then
+    log.debug("submit", { saved = false, err = tostring(cp) })
     vim.notify("Could not save checkpoint: " .. tostring(cp), vim.log.levels.ERROR)
     return
   end
@@ -423,6 +449,7 @@ function M:submit()
   self.model:set_checkpoint(cp)
   self.comments = comments_store.new()
   self:refresh()
+  log.debug("submit", { saved = true, composed_len = #composed, reviewed = #reviewed_paths })
   return self:deliver(composed)
 end
 
@@ -497,6 +524,7 @@ end
 
 function M:_deactivate()
   self.closed = true
+  log.debug("close", {})
   self:_stop_watcher()
   if self.augroup then
     pcall(vim.api.nvim_del_augroup_by_id, self.augroup)

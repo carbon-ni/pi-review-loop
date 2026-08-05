@@ -10,6 +10,10 @@ M.defaults = {
   -- (outside the worktree, so it never pollutes the diff).
   feedback_file = nil,
 
+  -- Emit structured debug logs to stdpath("data")/review-loop/review-loop.log.
+  -- Off by default; toggle at runtime with :ReviewLoopDebug.
+  debug = false,
+
   keymaps = {
     add_comment = "c",
     add_file_note = "<leader>rn",
