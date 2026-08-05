@@ -22,6 +22,7 @@ M.defaults = {
     prev_comment = "[r",
     submit = "<leader>rs",
     toggle_mode = "<leader>rm",
+    mark_viewed = "<leader>rv",
     refresh = "<leader>rr",
     close = "q",
   },

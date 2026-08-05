@@ -104,6 +104,7 @@ function M:_bind_panel()
   map(buf, "n", km.refresh, function() self:refresh() end, "Refresh review")
   map(buf, "n", km.submit, function() self:submit() end, "Submit review")
   map(buf, "n", km.toggle_mode, function() self:toggle_mode() end, "Toggle review mode")
+  map(buf, "n", km.mark_viewed, function() self:mark_viewed() end, "Mark file as viewed")
   map(buf, "n", km.close, function() self:close() end, "Close review")
 end
 
@@ -532,6 +533,26 @@ function M:_save_session()
   self._session.activePath = self.current_path
   local cp = self.model:current_checkpoint()
   self._session.checkpointId = cp and cp.id or nil
+  self.store:save_session(self._session)
+end
+
+function M:mark_viewed()
+  local panel = self.view and self.view.panel
+  local entry = panel and panel:get_item_at_cursor()
+  local path = entry and entry.layout and entry.layout.path or nil
+  if path == nil then return end
+  local vp = self._session.viewedPaths or {}
+  local seen = {}
+  for _, p in ipairs(vp) do seen[p] = true end
+  if seen[path] then
+    seen[path] = nil
+  else
+    seen[path] = true
+  end
+  local list = {}
+  for p in pairs(seen) do list[#list + 1] = p end
+  table.sort(list)
+  self._session.viewedPaths = list
   self.store:save_session(self._session)
 end
 
