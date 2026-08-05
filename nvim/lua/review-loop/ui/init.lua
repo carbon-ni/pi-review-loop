@@ -39,7 +39,29 @@ function M.open()
   self.model = model
   self.comments = store
   self.store = s
-  self.current_path = nil
+  self._session = stored.session or {
+    version = 1,
+    repoRoot = repo_root,
+    checkpointId = cp and cp.id or nil,
+    mode = "checkpoint",
+    comments = {},
+    viewedPaths = {},
+    activePath = nil,
+    createdAt = os.time() * 1000,
+    updatedAt = os.time() * 1000,
+  }
+
+  -- Restore comments and active file from saved session.
+  if stored.session and stored.session.comments then
+    for _, c in ipairs(stored.session.comments) do
+      comments_store.add(store, c)
+    end
+  end
+  if stored.session and stored.session.activePath then
+    self.current_path = stored.session.activePath
+  else
+    self.current_path = nil
+  end
   self.augroup = nil
   self.closed = false
   self.fs = nil
@@ -504,8 +526,18 @@ function M:prev_comment()
   self:_jump_comment(-1)
 end
 
+function M:_save_session()
+  self._session.mode = self.model:current_mode()
+  self._session.comments = comments_store.to_review_comments(self.comments)
+  self._session.activePath = self.current_path
+  local cp = self.model:current_checkpoint()
+  self._session.checkpointId = cp and cp.id or nil
+  self.store:save_session(self._session)
+end
+
 function M:toggle_mode()
   self.model:set_mode(self.model:current_mode() == "checkpoint" and "head" or "checkpoint")
+  self:_save_session()
   self:refresh()
 end
 
@@ -522,6 +554,9 @@ function M:submit()
   self.store:save_checkpoint(cp)
   self.model:set_checkpoint(cp)
   self.comments = comments_store.new()
+  self._session.comments = {}
+  self._session.checkpointId = cp.id
+  self.store:save_session(self._session)
   self:refresh()
   log.debug("submit", { saved = true, composed_len = #composed, reviewed = #reviewed_paths })
   return self:deliver(composed)
@@ -598,6 +633,7 @@ end
 
 function M:_deactivate()
   self.closed = true
+  self:_save_session()
   log.debug("close", {})
   self:_stop_watcher()
   if self.augroup then
