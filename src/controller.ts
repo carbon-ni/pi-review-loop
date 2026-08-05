@@ -171,6 +171,9 @@ export class ReviewController {
     if (this.model == null) return;
     if (message.type === "ready") {
       this.send({ type: "workspace", state: this.model.state() });
+      if (this.session) {
+        this.send({ type: "session-restore", comments: this.session.comments, activePath: this.session.activePath, mode: this.session.mode });
+      }
       return;
     }
 
@@ -187,6 +190,11 @@ export class ReviewController {
       } catch (error) {
         this.send({ type: "file-error", requestId: message.requestId, message: error instanceof Error ? error.message : String(error) });
       }
+      return;
+    }
+
+    if (message.type === "persist-comments") {
+      if (this.session) { this.session.comments = message.comments; void this.store?.saveSession(this.session); }
       return;
     }
 

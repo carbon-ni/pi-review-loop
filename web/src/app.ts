@@ -916,6 +916,13 @@ window.__reviewReceive = (message: HostMessage): void => {
     requestActiveFile();
     return;
   }
+  if (message.type === "session-restore") {
+    comments = message.comments.map((c) => ({ ...c, id: c.id ?? makeCommentId() }));
+    renderRecent();
+    renderTree();
+    updateSubmitButton();
+    return;
+  }
   if (message.type === "file") {
     if (message.requestId === activeRequestId) mountFile(message.file);
     return;

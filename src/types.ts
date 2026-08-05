@@ -78,10 +78,12 @@ export type WindowMessage =
   | { type: "ready" }
   | { type: "set-mode"; mode: ReviewMode }
   | { type: "request-file"; path: string; mode: ReviewMode; requestId: string }
-  | { type: "submit-review"; comments: ReviewComment[] };
+  | { type: "submit-review"; comments: ReviewComment[] }
+  | { type: "persist-comments"; comments: ReviewComment[] };
 
 export type HostMessage =
   | { type: "workspace"; state: WorkspaceState }
   | { type: "file"; requestId: string; file: FileContents }
   | { type: "file-error"; requestId: string; message: string }
-  | { type: "review-submitted"; checkpointAt: number; insertedFeedback: boolean };
+  | { type: "review-submitted"; checkpointAt: number; insertedFeedback: boolean }
+  | { type: "session-restore"; comments: ReviewComment[]; activePath: string | null; mode: ReviewMode };
