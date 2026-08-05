@@ -3,6 +3,7 @@
 
 local git = require("review-loop.git")
 local checkpoint = require("review-loop.checkpoint")
+local Store = require("review-loop.store")
 local Model = require("review-loop.state").WorkspaceModel
 local feedback = require("review-loop.feedback")
 local config = require("review-loop.config")
@@ -25,10 +26,19 @@ function M.open()
     repo_root = cwd
   end
 
+  -- Load from the shared .review-loop/ store; fall back to the legacy
+  -- per-repo checkpoint under stdpath("data")/review-loop/.
+  local s = Store.new(repo_root)
+  local stored = s:load()
+  local cp = stored.checkpoint or checkpoint.load(repo_root)
+  local model = Model.new(git, repo_root, cp)
+  local store = comments_store.new()
+
   local self = setmetatable({}, { __index = M })
   self.repo_root = repo_root
-  self.model = Model.new(git, repo_root, checkpoint.load(repo_root))
-  self.comments = comments_store.new()
+  self.model = model
+  self.comments = store
+  self.store = s
   self.current_path = nil
   self.augroup = nil
   self.closed = false
@@ -509,7 +519,7 @@ function M:submit()
     vim.notify("Could not save checkpoint: " .. tostring(cp), vim.log.levels.ERROR)
     return
   end
-  checkpoint.save(cp)
+  self.store:save_checkpoint(cp)
   self.model:set_checkpoint(cp)
   self.comments = comments_store.new()
   self:refresh()
