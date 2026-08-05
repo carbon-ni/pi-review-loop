@@ -34,6 +34,20 @@ export interface ReviewComment {
   side: "original" | "modified" | "file";
   line: number | null;
   body: string;
+  id?: string;
+}
+
+/** Mutable work-in-progress: comments, viewed paths, mode, resume state. */
+export interface ReviewSession {
+  version: 1;
+  repoRoot: string;
+  checkpointId: string | null;
+  mode: ReviewMode;
+  comments: ReviewComment[];
+  viewedPaths: string[];
+  activePath: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface StoredFilePresent {

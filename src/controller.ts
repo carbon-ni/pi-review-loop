@@ -4,6 +4,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { open, type GlimpseWindow } from "glimpseui";
 import { createCheckpoint, getRepoRoot } from "./git.js";
 import { composeFeedback } from "./prompt.js";
+import { ReviewStore } from "./store.js";
 import type { HostMessage, ReviewCheckpoint, WindowMessage } from "./types.js";
 import { loadReviewHtml } from "./ui.js";
 import { WorkspaceModel } from "./workspace.js";
@@ -16,7 +17,7 @@ export const CHECKPOINT_ENTRY = "review-loop/checkpoint";
  * Scanning them is wasteful and, for `.pi/intray`, fatal: its `.alias` symlinks
  * point at Unix sockets and make readdirp throw EOPNOTSUPP, which kills pi.
  */
-const IGNORED_TOP_LEVEL = [".git", "node_modules", ".pi"];
+const IGNORED_TOP_LEVEL = [".git", "node_modules", ".pi", ".review-loop"];
 
 export function isWatchIgnored(repoRoot: string, path: string): boolean {
   const rel = relative(repoRoot, path);
@@ -53,6 +54,7 @@ export class ReviewController {
   private window: GlimpseWindow | null = null;
   private watcher: FSWatcher | null = null;
   private model: WorkspaceModel | null = null;
+  private store: ReviewStore | null = null;
   private repoRoot = "";
   private refreshTimer: NodeJS.Timeout | null = null;
   private operation = Promise.resolve();
@@ -75,7 +77,10 @@ export class ReviewController {
     }
 
     this.repoRoot = await getRepoRoot(this.pi, ctx.cwd);
-    this.model = await WorkspaceModel.create(this.pi, this.repoRoot, latestCheckpoint(ctx, this.repoRoot));
+    this.store = new ReviewStore(this.repoRoot);
+    const stored = await this.store.load();
+    const checkpoint = stored.checkpoint ?? latestCheckpoint(ctx, this.repoRoot);
+    this.model = await WorkspaceModel.create(this.pi, this.repoRoot, checkpoint);
     await this.model.refresh();
     await this.startWatcher(ctx);
 
@@ -99,6 +104,7 @@ export class ReviewController {
     this.refreshTimer = null;
     await this.watcher?.close();
     this.watcher = null;
+    this.store = null;
     const window = this.window;
     this.window = null;
     try { window?.close(); } catch {}
@@ -171,6 +177,7 @@ export class ReviewController {
         const feedback = composeFeedback(message.comments);
         const reviewedPaths = this.model.checkpointChangedPaths();
         const checkpoint = await createCheckpoint(this.pi, this.repoRoot, reviewedPaths, feedback);
+        await this.store?.saveCheckpoint(checkpoint);
         this.pi.appendEntry<ReviewCheckpoint>(CHECKPOINT_ENTRY, checkpoint);
         this.model.setCheckpoint(checkpoint);
         const state = await this.model.refresh();
@@ -199,6 +206,7 @@ export class ReviewController {
     this.refreshTimer = null;
     void this.watcher?.close();
     this.watcher = null;
+    this.store = null;
     this.onClosed();
   }
 }

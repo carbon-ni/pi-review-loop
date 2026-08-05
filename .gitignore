@@ -1,4 +1,5 @@
 node_modules/
 .pi/hf-sessions/
+.review-loop/
 .DS_Store
 *.log
